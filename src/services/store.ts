@@ -1,0 +1,426 @@
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  limit,
+  serverTimestamp,
+  onSnapshot
+} from 'firebase/firestore';
+import { db } from '../firebase';
+import { 
+  Office, 
+  UserProfile, 
+  SubjectClassification, 
+  NothiFile, 
+  Recipient, 
+  Letter, 
+  AuditLog,
+  Officer,
+  CopyPreset
+} from '../types';
+
+// ==========================================
+// AUDIT LOG SERVICE
+// ==========================================
+export async function logAuditAction(
+  officeId: string, 
+  userId: string, 
+  userName: string,
+  action: string, 
+  entityType: string, 
+  entityId: string,
+  details?: string
+) {
+  try {
+    const logsRef = collection(db, 'audit_logs');
+    const newLog: Omit<AuditLog, 'id'> = {
+      office_id: officeId,
+      user_id: userId,
+      user_name: userName,
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      details,
+      timestamp: new Date().toISOString()
+    };
+    await addDoc(logsRef, newLog);
+  } catch (error) {
+    console.error("Error logging audit action:", error);
+  }
+}
+
+// ==========================================
+// OFFICE SERVICE
+// ==========================================
+export async function getOffice(officeId: string): Promise<Office | null> {
+  const docRef = doc(db, 'offices', officeId);
+  const snap = await getDoc(docRef);
+  if (snap.exists()) {
+    return snap.data() as Office;
+  }
+  return null;
+}
+
+export async function createOrGetOffice(officeId: string, defaultData: Partial<Office>): Promise<Office> {
+  const existing = await getOffice(officeId);
+  if (existing) return existing;
+
+  const newOffice: Office = {
+    id: officeId,
+    office_name: defaultData.office_name || 'উপজেলা উপানুষ্ঠানিক শিক্ষা কর্মকর্তার কার্যালয়',
+    office_code: defaultData.office_code || '০৩',
+    geo_code: defaultData.geo_code || '৬১২৪',
+    address: defaultData.address || 'হালুয়াঘাট, ময়মনসিংহ',
+    email: defaultData.email || 'unfeohaluaghat@gmail.com',
+    phone: defaultData.phone || '',
+    website: defaultData.website || '',
+    logo: defaultData.logo || '',
+    active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  await setDoc(doc(db, 'offices', officeId), newOffice);
+  
+  // Seed default classifications for a new office
+  await seedDefaultSubjectClassifications(officeId);
+  
+  return newOffice;
+}
+
+export async function updateOffice(officeId: string, data: Partial<Office>): Promise<void> {
+  const docRef = doc(db, 'offices', officeId);
+  await updateDoc(docRef, {
+    ...data,
+    updated_at: new Date().toISOString()
+  });
+}
+
+// ==========================================
+// USER PROFILE SERVICE
+// ==========================================
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const docRef = doc(db, 'users', userId);
+  const snap = await getDoc(docRef);
+  if (snap.exists()) {
+    return snap.data() as UserProfile;
+  }
+  return null;
+}
+
+export async function saveUserProfile(profile: UserProfile): Promise<void> {
+  const docRef = doc(db, 'users', profile.id);
+  const cleanData = cleanFirestorePayload(profile);
+  await setDoc(docRef, {
+    ...cleanData,
+    updated_at: new Date().toISOString()
+  });
+}
+
+// ==========================================
+// SUBJECT CLASSIFICATIONS
+// ==========================================
+export async function getSubjectClassifications(officeId: string): Promise<SubjectClassification[]> {
+  const classificationsRef = collection(db, 'subject_classifications');
+  const q = query(
+    classificationsRef, 
+    where('office_id', '==', officeId),
+    where('active', '==', true)
+  );
+  
+  const snap = await getDocs(q);
+  const list: SubjectClassification[] = [];
+  snap.forEach((d) => {
+    list.push({ id: d.id, ...d.data() } as SubjectClassification);
+  });
+  return list.sort((a, b) => a.code.localeCompare(b.code));
+}
+
+export async function saveSubjectClassification(classification: Omit<SubjectClassification, 'id'> & { id?: string }): Promise<void> {
+  if (classification.id) {
+    const docRef = doc(db, 'subject_classifications', classification.id);
+    await setDoc(docRef, classification, { merge: true });
+  } else {
+    const classificationsRef = collection(db, 'subject_classifications');
+    await addDoc(classificationsRef, classification);
+  }
+}
+
+async function seedDefaultSubjectClassifications(officeId: string) {
+  const defaults = [
+    { code: '০১', title: 'প্রশাসন', description: 'প্রশাসনিক চিঠিপত্র ও আদেশ' },
+    { code: '০২', title: 'অর্থ', description: 'বাজেট, হিসাব ও অর্থ সংক্রান্ত' },
+    { code: '০৩', title: 'প্রশিক্ষণ', description: 'প্রশিক্ষণ ও কর্মশালা সংক্রান্ত' },
+    { code: '০৪', title: 'শিক্ষা', description: 'শিক্ষা কর্মসূচি ও উপকরণ' },
+    { code: '০৫', title: 'মানবসম্পদ', description: 'কর্মকর্তা/কর্মচারী তথ্যাদি ও ছুটি' },
+    { code: '০৬', title: 'সভা', description: 'সভা আহ্বান ও সিদ্ধান্ত সমূহ' },
+    { code: '০৭', title: 'অফিস আদেশ', description: 'জরুরি দাপ্তরিক অফিস আদেশ' },
+  ];
+
+  for (const item of defaults) {
+    await saveSubjectClassification({
+      office_id: officeId,
+      code: item.code,
+      title: item.title,
+      description: item.description,
+      active: true,
+    });
+  }
+}
+
+// ==========================================
+// FILES (নথি) SERVICE
+// ==========================================
+export async function getFiles(officeId: string): Promise<NothiFile[]> {
+  const filesRef = collection(db, 'files');
+  const q = query(
+    filesRef, 
+    where('office_id', '==', officeId),
+    where('active', '==', true)
+  );
+  const snap = await getDocs(q);
+  const list: NothiFile[] = [];
+  snap.forEach((d) => {
+    list.push({ id: d.id, ...d.data() } as NothiFile);
+  });
+  return list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export async function saveFile(file: Omit<NothiFile, 'id' | 'created_at'> & { id?: string; created_at?: string }): Promise<string> {
+  const cleanData: any = {};
+  Object.keys(file).forEach(key => {
+    const val = (file as any)[key];
+    if (val !== undefined) {
+      cleanData[key] = val;
+    }
+  });
+
+  const { id, ...dataWithoutId } = cleanData;
+
+  if (id) {
+    const docRef = doc(db, 'files', id);
+    await setDoc(docRef, dataWithoutId, { merge: true });
+    return id;
+  } else {
+    const filesRef = collection(db, 'files');
+    const docRef = await addDoc(filesRef, {
+      ...dataWithoutId,
+      created_at: new Date().toISOString()
+    });
+    return docRef.id;
+  }
+}
+
+// ==========================================
+// RECIPIENTS SERVICE
+// ==========================================
+export async function getRecipients(officeId: string): Promise<Recipient[]> {
+  const recipientsRef = collection(db, 'recipients');
+  const q = query(
+    recipientsRef, 
+    where('office_id', '==', officeId)
+  );
+  const snap = await getDocs(q);
+  const list: Recipient[] = [];
+  snap.forEach((d) => {
+    list.push({ id: d.id, ...d.data() } as Recipient);
+  });
+  return list;
+}
+
+// Helper to deep clean payload from undefined properties to prevent firestore serialization errors
+function cleanFirestorePayload<T>(obj: T): any {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => cleanFirestorePayload(item));
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    Object.keys(obj).forEach(key => {
+      const val = (obj as any)[key];
+      if (val !== undefined) {
+        cleaned[key] = cleanFirestorePayload(val);
+      }
+    });
+    return cleaned;
+  }
+  return obj;
+}
+
+export async function saveRecipient(recipient: Omit<Recipient, 'id'> & { id?: string }): Promise<string> {
+  const cleanData = cleanFirestorePayload(recipient);
+  const { id, ...dataWithoutId } = cleanData;
+
+  if (id) {
+    const docRef = doc(db, 'recipients', id);
+    await setDoc(docRef, dataWithoutId, { merge: true });
+    return id;
+  } else {
+    const recipientsRef = collection(db, 'recipients');
+    const docRef = await addDoc(recipientsRef, dataWithoutId);
+    return docRef.id;
+  }
+}
+
+export async function saveOfficer(officer: Omit<Officer, 'id'> & { id?: string }): Promise<string> {
+  const cleanData = cleanFirestorePayload(officer);
+  const { id, ...dataWithoutId } = cleanData;
+
+  if (id) {
+    const docRef = doc(db, 'officers', id);
+    await setDoc(docRef, {
+      ...dataWithoutId,
+      updated_at: new Date().toISOString()
+    }, { merge: true });
+    return id;
+  } else {
+    const officersRef = collection(db, 'officers');
+    const docRef = await addDoc(officersRef, {
+      ...dataWithoutId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    return docRef.id;
+  }
+}
+
+export async function deleteOfficer(id: string): Promise<void> {
+  const docRef = doc(db, 'officers', id);
+  await deleteDoc(docRef);
+}
+
+// ==========================================
+// LETTERS SERVICE
+// ==========================================
+export async function getLetters(officeId: string): Promise<Letter[]> {
+  const lettersRef = collection(db, 'letters');
+  const q = query(
+    lettersRef, 
+    where('office_id', '==', officeId)
+  );
+  const snap = await getDocs(q);
+  const list: Letter[] = [];
+  snap.forEach((d) => {
+    list.push({ id: d.id, ...d.data() } as Letter);
+  });
+  return list.sort((a, b) => {
+    const timeA = a.updated_at || '';
+    const timeB = b.updated_at || '';
+    return timeB.localeCompare(timeA);
+  });
+}
+
+export async function getLetter(letterId: string): Promise<Letter | null> {
+  const docRef = doc(db, 'letters', letterId);
+  const snap = await getDoc(docRef);
+  if (snap.exists()) {
+    return { id: snap.id, ...snap.data() } as Letter;
+  }
+  return null;
+}
+
+export async function saveLetter(letter: Omit<Letter, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string }): Promise<string> {
+  const now = new Date().toISOString();
+  const cleanData = cleanFirestorePayload(letter);
+  const { id, ...dataWithoutId } = cleanData;
+
+  if (id) {
+    const docRef = doc(db, 'letters', id);
+    await setDoc(docRef, {
+      ...dataWithoutId,
+      updated_at: now
+    }, { merge: true });
+    return id;
+  } else {
+    const lettersRef = collection(db, 'letters');
+    const docAdded = await addDoc(lettersRef, {
+      ...dataWithoutId,
+      created_at: now,
+      updated_at: now
+    });
+    return docAdded.id;
+  }
+}
+
+export async function deleteLetter(letterId: string): Promise<void> {
+  const docRef = doc(db, 'letters', letterId);
+  await deleteDoc(docRef);
+}
+
+// ==========================================
+// AUDIT LOG LIST SERVICE
+// ==========================================
+export async function getAuditLogs(officeId: string): Promise<AuditLog[]> {
+  const logsRef = collection(db, 'audit_logs');
+  const q = query(
+    logsRef,
+    where('office_id', '==', officeId)
+  );
+  try {
+    const snap = await getDocs(q);
+    const list: AuditLog[] = [];
+    snap.forEach((d) => {
+      list.push({ id: d.id, ...d.data() } as AuditLog);
+    });
+    // Sort in-memory descending by timestamp
+    list.sort((a, b) => {
+      const timeA = a.timestamp || '';
+      const timeB = b.timestamp || '';
+      return timeB.localeCompare(timeA);
+    });
+    return list.slice(0, 150);
+  } catch (error) {
+    console.error("Error inside getAuditLogs:", error);
+    throw error;
+  }
+}
+
+// ==========================================
+// COPY PRESETS (অনুলিপি) SERVICE
+// ==========================================
+export async function getCopyPresets(officeId: string): Promise<CopyPreset[]> {
+  const presetsRef = collection(db, 'copy_presets');
+  const q = query(
+    presetsRef, 
+    where('office_id', '==', officeId)
+  );
+  try {
+    const snap = await getDocs(q);
+    const list: CopyPreset[] = [];
+    snap.forEach((d) => {
+      list.push({ id: d.id, ...d.data() } as CopyPreset);
+    });
+    return list;
+  } catch (error) {
+    console.error("Error in getCopyPresets:", error);
+    return [];
+  }
+}
+
+export async function saveCopyPreset(preset: Omit<CopyPreset, 'id'> & { id?: string }): Promise<string> {
+  const cleanData = cleanFirestorePayload(preset);
+  const { id, ...dataWithoutId } = cleanData;
+
+  if (id) {
+    const docRef = doc(db, 'copy_presets', id);
+    await setDoc(docRef, dataWithoutId, { merge: true });
+    return id;
+  } else {
+    const presetsRef = collection(db, 'copy_presets');
+    const docRef = await addDoc(presetsRef, dataWithoutId);
+    return docRef.id;
+  }
+}
+
+export async function deleteCopyPreset(id: string): Promise<void> {
+  const docRef = doc(db, 'copy_presets', id);
+  await deleteDoc(docRef);
+}

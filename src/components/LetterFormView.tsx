@@ -1,0 +1,1697 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  ArrowLeft, 
+  Save, 
+  CheckCircle2, 
+  Trash2, 
+  Plus, 
+  UserPlus, 
+  Layers,
+  HelpCircle,
+  FileCheck,
+  Search,
+  X,
+  Mail,
+  Phone,
+  MapPin,
+  Building,
+  User,
+  FolderPlus,
+  Folder
+} from 'lucide-react';
+import { Letter, NothiFile, Recipient, SubjectClassification, CopyRecipient, LetterType, Officer, CopyPreset } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import Editor from './Editor';
+import { generateNextMemoNumber } from '../utils/memoGenerator';
+import { countToBangla } from '../utils/banglaHelpers';
+import { saveRecipient, saveOfficer, saveFile, saveCopyPreset, deleteCopyPreset } from '../services/store';
+
+interface LetterFormViewProps {
+  letter?: Letter; // If editing
+  files: NothiFile[];
+  classifications: SubjectClassification[];
+  recipients: Recipient[];
+  officers: Officer[];
+  copyPresets?: CopyPreset[];
+  onSave: (letterData: Omit<Letter, 'id' | 'created_at' | 'updated_at'> & { id?: string }, issueNow: boolean) => Promise<void>;
+  onCancel: () => void;
+}
+
+export default function LetterFormView({
+  letter,
+  files = [],
+  classifications = [],
+  recipients = [],
+  officers = [],
+  copyPresets = [],
+  onSave,
+  onCancel
+}: LetterFormViewProps) {
+  const { office, profile, user } = useAuth();
+
+  // Form states
+  const [letterType, setLetterType] = useState<LetterType>(letter?.letter_type || 'standard');
+  const [selectedFileId, setSelectedFileId] = useState(letter?.file_id || '');
+  const [selectedRecipientId, setSelectedRecipientId] = useState(letter?.recipient_id || '');
+  const [subject, setSubject] = useState(letter?.subject || '');
+  const [body, setBody] = useState(letter?.body || '<p>মহোদয়,</p><p>বিনীত নিবেদন এই যে, ...</p>');
+  const [issueDate, setIssueDate] = useState(letter?.issue_date || new Date().toISOString().split('T')[0]);
+  const [notes, setNotes] = useState(letter?.notes || '');
+  const [memoNo, setMemoNo] = useState(letter?.memo_no || '');
+  const [serialNo, setSerialNo] = useState(letter?.serial_no || '');
+  const [copyRecipients, setCopyRecipients] = useState<CopyRecipient[]>(letter?.copy_recipients || []);
+
+  // Recipient Display Field Choices
+  const [showName, setShowName] = useState<boolean>(
+    letter?.recipient_display_options?.show_name !== false
+  );
+  const [showDesignation, setShowDesignation] = useState<boolean>(
+    letter?.recipient_display_options?.show_designation !== false
+  );
+  const [showOrganization, setShowOrganization] = useState<boolean>(
+    letter?.recipient_display_options?.show_organization !== false
+  );
+  const [showAddress, setShowAddress] = useState<boolean>(
+    letter?.recipient_display_options?.show_address !== false
+  );
+
+  // For copy recipients additions
+  const [newCopyName, setNewCopyName] = useState('');
+  const [newCopyDesignation, setNewCopyDesignation] = useState('');
+  const [newCopyOrg, setNewCopyOrg] = useState('');
+
+  // Auto memo number preview block
+  const [loadingMemo, setLoadingMemo] = useState(false);
+  const [errorText, setErrorText] = useState('');
+
+  // For selecting recipients via Modal
+  const [recipientModalOpen, setRecipientModalOpen] = useState(false);
+  const [recipientSearchQuery, setRecipientSearchQuery] = useState('');
+  const [activeRecipientTab, setActiveRecipientTab] = useState<'existing' | 'new'>('existing');
+
+  // New Recipient Form states
+  const [newRecName, setNewRecName] = useState('');
+  const [newRecDesignation, setNewRecDesignation] = useState('');
+  const [newRecOrg, setNewRecOrg] = useState('');
+  const [newRecAddress, setNewRecAddress] = useState('');
+  const [newRecMobile, setNewRecMobile] = useState('');
+  const [newRecEmail, setNewRecEmail] = useState('');
+  const [savingNewRecipient, setSavingNewRecipient] = useState(false);
+  // For selecting officers via Modal
+  const [selectedSignatoryId, setSelectedSignatoryId] = useState(letter?.signatory_officer_id || '');
+  const [officerModalOpen, setOfficerModalOpen] = useState(false);
+  const [officerSearchQuery, setOfficerSearchQuery] = useState('');
+  const [activeOfficerTab, setActiveOfficerTab] = useState<'existing' | 'new'>('existing');
+
+  // New Officer Form states
+  const [newOffName, setNewOffName] = useState('');
+  const [newOffDesignation, setNewOffDesignation] = useState('');
+  const [newOffPhone, setNewOffPhone] = useState('');
+  const [newOffEmail, setNewOffEmail] = useState('');
+  const [newOffActive, setNewOffActive] = useState(true);
+  const [savingNewOfficer, setSavingNewOfficer] = useState(false);
+
+  // For selecting files/folders via Modal
+  const [fileModalOpen, setFileModalOpen] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [activeFileTab, setActiveFileTab] = useState<'existing' | 'new'>('existing');
+
+  // New File Form states
+  const [newFileTitle, setNewFileTitle] = useState('');
+  const [newFileCode, setNewFileCode] = useState('');
+  const [newFileOpeningYear, setNewFileOpeningYear] = useState('26');
+  const [newFileClassificationId, setNewFileClassificationId] = useState('');
+  const [newFileDescription, setNewFileDescription] = useState('');
+  const [savingNewFile, setSavingNewFile] = useState(false);
+
+  const [modalError, setModalError] = useState('');
+
+  // Auto-generate memo when selectedFileId changes
+  useEffect(() => {
+    // If we're editing an already issued letter, we do NOT change the memo number!
+    if (letter && letter.status === 'issued') {
+      return;
+    }
+
+    if (!selectedFileId || !office) {
+      setMemoNo('');
+      setSerialNo('');
+      return;
+    }
+
+    const triggerMemoGen = async () => {
+      setLoadingMemo(true);
+      setErrorText('');
+      try {
+        const fileObj = files.find(f => f.id === selectedFileId);
+        if (!fileObj) return;
+
+        const classObj = classifications.find(c => c.id === fileObj.subject_classification_id);
+
+        const res = await generateNextMemoNumber({
+          office,
+          classification: classObj,
+          file: fileObj
+        });
+
+        setMemoNo(res.memo_no);
+        setSerialNo(res.serial_no);
+      } catch (err) {
+        console.error("Error auto-generating memo number:", err);
+        setErrorText('স্মারক নম্বর সমন্বয় করতে ত্রুটি হয়েছে।');
+      } finally {
+        setLoadingMemo(false);
+      }
+    };
+
+    triggerMemoGen();
+  }, [selectedFileId, letterType, files, classifications, office, letter]);
+
+  // Clean form defaults depending on type
+  useEffect(() => {
+    if (letterType === 'office_order') {
+      setSubject('অফিস আদেশ'); // automatic placeholder
+    } else if (letterType === 'notice') {
+      setSubject('বিজ্ঞপ্তি');
+    } else {
+      if (subject === 'অফিস আদেশ' || subject === 'বিজ্ঞপ্তি') {
+        setSubject('');
+      }
+    }
+  }, [letterType]);
+
+  // Add Copy Recipient
+  const addCopyRecipient = async () => {
+    if (!newCopyName.trim()) return;
+    const nameText = newCopyName.trim();
+    const desText = newCopyDesignation.trim();
+    const orgText = newCopyOrg.trim();
+
+    const newCopy: CopyRecipient = {
+      id: 'cr_' + Date.now(),
+      recipient_name: nameText,
+      designation: desText || undefined,
+      organization: orgText || undefined,
+    };
+    setCopyRecipients([...copyRecipients, newCopy]);
+    setNewCopyName('');
+    setNewCopyDesignation('');
+    setNewCopyOrg('');
+
+    // Save copy preset selection to database
+    try {
+      const exists = copyPresets.some(
+        p => 
+          p.recipient_name.toLowerCase() === nameText.toLowerCase() &&
+          (p.designation || '').toLowerCase() === (desText || '').toLowerCase() &&
+          (p.organization || '').toLowerCase() === (orgText || '').toLowerCase()
+      );
+      if (!exists && office?.id) {
+        await saveCopyPreset({
+          office_id: office.id,
+          recipient_name: nameText,
+          designation: desText || undefined,
+          organization: orgText || undefined
+        });
+      }
+    } catch (err) {
+      console.error("Error saving copy preset:", err);
+    }
+  };
+
+  // Remove Copy Recipient
+  const removeCopyRecipient = (id: string) => {
+    setCopyRecipients(copyRecipients.filter(cr => cr.id !== id));
+  };
+
+  // Add New Recipient inside Selector Modal
+  const handleAddNewRecipient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalError('');
+    
+    if (!newRecName.trim()) {
+      setModalError('অনুগ্রহ করে প্রাপকের নাম বাংলায় লিখুন।');
+      return;
+    }
+    if (!newRecAddress.trim()) {
+      setModalError('অনুগ্রহ করে প্রাপকের ঠিকানা বাংলায় লিখুন।');
+      return;
+    }
+
+    setSavingNewRecipient(true);
+    try {
+      const addedId = await saveRecipient({
+        office_id: office?.id || '',
+        recipient_name: newRecName.trim(),
+        designation: newRecDesignation.trim() || undefined,
+        organization: newRecOrg.trim() || undefined,
+        address: newRecAddress.trim(),
+        mobile: newRecMobile.trim() || undefined,
+        email: newRecEmail.trim() || undefined,
+      });
+
+      setSelectedRecipientId(addedId);
+      
+      // Clear values
+      setNewRecName('');
+      setNewRecDesignation('');
+      setNewRecOrg('');
+      setNewRecAddress('');
+      setNewRecMobile('');
+      setNewRecEmail('');
+      setModalError('');
+      
+      // Close modal
+      setRecipientModalOpen(false);
+    } catch (err) {
+      console.error("Error inside handleAddNewRecipient in Modal:", err);
+      setModalError('প্রাপক সংরক্ষণ করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।');
+    } finally {
+      setSavingNewRecipient(false);
+    }
+  };
+
+  // Add New Signatory Officer inside Selector Modal
+  const handleAddNewOfficer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalError('');
+    
+    if (!newOffName.trim()) {
+      setModalError('অনুগ্রহ করে অফিসারের নাম বাংলায় লিখুন।');
+      return;
+    }
+    if (!newOffDesignation.trim()) {
+      setModalError('অনুগ্রহ করে অফিসারের পদবি বাংলায় লিখুন।');
+      return;
+    }
+
+    setSavingNewOfficer(true);
+    try {
+      const addedId = await saveOfficer({
+        office_id: office?.id || '',
+        name: newOffName.trim(),
+        designation: newOffDesignation.trim(),
+        phone: newOffPhone.trim() || undefined,
+        email: newOffEmail.trim() || undefined,
+        active: newOffActive,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+
+      setSelectedSignatoryId(addedId);
+      
+      // Clear values
+      setNewOffName('');
+      setNewOffDesignation('');
+      setNewOffPhone('');
+      setNewOffEmail('');
+      setNewOffActive(true);
+      setModalError('');
+      
+      // Close modal
+      setOfficerModalOpen(false);
+    } catch (err) {
+      console.error("Error inside handleAddNewOfficer in Modal:", err);
+      setModalError('অফিসার সংরক্ষণ করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।');
+    } finally {
+      setSavingNewOfficer(false);
+    }
+  };
+
+  // Add New File/Nothi inside Selector Modal
+  const handleAddNewFile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalError('');
+    
+    if (!newFileTitle.trim()) {
+      setModalError('অনুগ্রহ করে ফাইলের শিরোনাম লিখুন।');
+      return;
+    }
+    if (!newFileCode.trim()) {
+      setModalError('অনুগ্রহ করে ফাইলের কোড নম্বর লিখুন।');
+      return;
+    }
+
+    setSavingNewFile(true);
+    try {
+      const addedId = await saveFile({
+        office_id: office?.id || '',
+        file_title: newFileTitle.trim(),
+        file_code: newFileCode.trim(),
+        opening_year: newFileOpeningYear.trim() || '26',
+        subject_classification_id: newFileClassificationId || undefined,
+        description: newFileDescription.trim() || undefined,
+        active: true
+      });
+
+      setSelectedFileId(addedId);
+      
+      // Clear values
+      setNewFileTitle('');
+      setNewFileCode('');
+      setNewFileOpeningYear('26');
+      setNewFileClassificationId('');
+      setNewFileDescription('');
+      setModalError('');
+      
+      // Close modal
+      setFileModalOpen(false);
+    } catch (err) {
+      console.error("Error inside handleAddNewFile in Modal:", err);
+      setModalError('নথি ফোল্ডার সংরক্ষণ করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।');
+    } finally {
+      setSavingNewFile(false);
+    }
+  };
+
+  // Submission Validation & Save
+  const handleSubmit = async (issueNow: boolean) => {
+    setErrorText('');
+    
+    // Dynamic Validation Check
+    if (!selectedFileId) {
+      setErrorText('অনুগ্রহ করে চিঠির নথি (File) নির্বাচন করুন।');
+      return;
+    }
+
+    if (letterType === 'standard' && !selectedRecipientId) {
+      setErrorText('সাধারণ পত্রের ক্ষেত্রে প্রাপক নির্বাচন করা আবশ্যক।');
+      return;
+    }
+
+    if (letterType !== 'office_order' && !subject.trim()) {
+      setErrorText('চিঠির বিষয় (Subject) লিখুন।');
+      return;
+    }
+
+    if (!body || body.trim() === '' || body === '<p><br></p>') {
+      setErrorText('চিঠির মূল বিবরণ (Body) খালি রাখা যাবে না।');
+      return;
+    }
+
+    if (!memoNo) {
+      setErrorText('স্মারক নম্বর জেনারেট করা সম্ভব হয়নি। ফাইল ঠিক করুন।');
+      return;
+    }
+
+    try {
+      await onSave({
+        id: letter?.id,
+        office_id: office?.id || '',
+        file_id: selectedFileId,
+        recipient_id: selectedRecipientId || undefined,
+        sender_user_id: profile?.id || '',
+        signatory_officer_id: selectedSignatoryId || undefined,
+        subject: subject,
+        body: body,
+        letter_type: letterType,
+        memo_no: memoNo,
+        serial_no: serialNo,
+        issue_date: issueDate,
+        status: issueNow ? 'issued' : 'draft',
+        notes: notes,
+        created_by: user?.uid || '',
+        copy_recipients: copyRecipients,
+        recipient_display_options: {
+          show_name: showName,
+          show_designation: showDesignation,
+          show_organization: showOrganization,
+          show_address: showAddress
+        }
+      }, issueNow);
+    } catch (err) {
+      console.error(err);
+      setErrorText('চিঠি সংরক্ষণ করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
+    }
+  };
+
+  const letterTypes: { k: LetterType; v: string }[] = [
+    { k: 'standard', v: 'সাধারণ পত্র (Standard Letter)' },
+    { k: 'office_order', v: 'অফিস আদেশ (Office Order)' },
+    { k: 'notice', v: 'নোটিশ (Notice)' },
+    { k: 'circular', v: 'পরিপত্র (Circular)' },
+    { k: 'invitation', v: 'আমন্ত্রণপত্র (Invitation)' },
+    { k: 'meeting', v: 'সভার নোটিশ (Meeting)' },
+    { k: 'training', v: 'প্রশিক্ষণ নোটিশ (Training)' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* HEADER ACTION BAR */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-lg border border-gray-100 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={onCancel}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition cursor-pointer"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">
+              {letter ? 'চিঠিপত্র সংশোধন (Edit Letter)' : 'নতুন সরকারি পত্র লিখুন (Write Letter)'}
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">বাংলাদেশ সরকারের অফিস প্যাটার্নে চিঠি ড্রাফট বা সরাসরি জারি করুন</p>
+          </div>
+        </div>
+        
+        {/* Save/Issue Controls */}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => handleSubmit(false)}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer"
+          >
+            <Save size={16} />
+            খসড়া হিসেবে সংরক্ষণ (Draft)
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSubmit(true)}
+            className="px-4 py-2 bg-[#006A4E] hover:bg-opacity-90 text-white rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer shadow-xs"
+          >
+            <CheckCircle2 size={16} />
+            সরাসরি জারি করুন (Issue Now)
+          </button>
+        </div>
+      </div>
+
+      {errorText && (
+        <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-semibold">
+          {errorText}
+        </div>
+      )}
+
+      {/* COMPOSITION FORM GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* LEFT / CENTRAL CARD: THE BODY AND CORE INFO */}
+        <div className="bg-white p-6 rounded-lg border border-gray-100 shadow-xs lg:col-span-2 space-y-5">
+          <h2 className="text-md font-bold text-gray-800 border-b border-gray-100 pb-2">চিঠিপত্রের বিবরণ (Body & Details)</h2>
+          
+          {/* Letter Type Selection */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">পত্রের বিবরণ / ধরন (Letter Type)</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {letterTypes.map((t) => (
+                <button
+                  key={t.k}
+                  type="button"
+                  onClick={() => setLetterType(t.k)}
+                  className={`p-2 text-xs font-bold rounded-lg border text-center transition ${
+                    letterType === t.k 
+                      ? 'bg-emerald-50 text-[#006A4E] border-[#006A4E]' 
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {t.v.split(' ')[0]} {/* display first word like "সাধারণ" */}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Subject Block (Hidden for office order) */}
+          {letterType !== 'office_order' && (
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">পত্রের বিষয় (Subject)</label>
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="চিঠিপত্রের মূল বিষয়বস্তু বাংলায় উল্লেখ করুন..."
+                className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+              />
+            </div>
+          )}
+
+          {/* Core TipTap Editor Connect */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">চিঠিপত্রের মূল বিবরণী (Rich Text Body)</label>
+            <Editor value={body} onChange={setBody} />
+          </div>
+
+          {/* Copy Recipients Section (অনুলিপি) */}
+          <div className="pt-4 border-t border-gray-100">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 block">অনুলিপি জ্ঞাতার্থে ও কার্যাদার্থে প্রেরণ (Copy Recipients)</h3>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+              <input
+                type="text"
+                value={newCopyName}
+                onChange={(e) => setNewCopyName(e.target.value)}
+                placeholder="প্রাপকের নাম বা পদবি"
+                className="p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none"
+              />
+              <input
+                type="text"
+                value={newCopyDesignation}
+                onChange={(e) => setNewCopyDesignation(e.target.value)}
+                placeholder="অতিরিক্ত পদবি বা শাখা (ঐচ্ছিক)"
+                className="p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none"
+              />
+              <input
+                type="text"
+                value={newCopyOrg}
+                onChange={(e) => setNewCopyOrg(e.target.value)}
+                placeholder="অফিস বা প্রতিষ্ঠানের নাম (ঐচ্ছিক)"
+                className="p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none"
+              />
+            </div>
+            
+             <div className="flex gap-2 items-center">
+              <button
+                type="button"
+                onClick={addCopyRecipient}
+                className="px-3 py-1.5 bg-[#006A4E]/10 text-[#006A4E] hover:bg-[#006A4E]/16 hover:bg-opacity-80 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Plus size={14} />
+                অনুলিপি প্রাপক যুক্ত করুন
+              </button>
+            </div>
+
+            {/* Database Presets Suggestions */}
+            {copyPresets && copyPresets.length > 0 && (
+              <div className="mt-3 mb-1">
+                <span className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">পূর্বে ব্যবহৃত অনুলিপি তালিকা (ক্লিক করুন পূরণ করতে):</span>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 bg-gray-50/50 rounded-lg border border-gray-150">
+                  {copyPresets.map(preset => (
+                    <div 
+                      key={preset.id}
+                      className="inline-flex items-center gap-1 text-[11px] bg-white border border-gray-200 text-gray-700 rounded-lg py-0.5 px-2 hover:border-[#006A4E] hover:bg-emerald-50/10 transition group"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewCopyName(preset.recipient_name);
+                          setNewCopyDesignation(preset.designation || '');
+                          setNewCopyOrg(preset.organization || '');
+                        }}
+                        className="font-medium text-gray-700 hover:text-[#006A4E] transition text-left cursor-pointer"
+                        title="আগের মত পূরণ করতে ক্লিক করুন"
+                      >
+                        {preset.recipient_name}
+                        {preset.designation && ` (${preset.designation})`}
+                        {preset.organization && ` - ${preset.organization}`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await deleteCopyPreset(preset.id);
+                          } catch (err) {
+                            console.error("Error deleting copy preset:", err);
+                          }
+                        }}
+                        className="text-gray-300 hover:text-red-500 transition pl-1 ml-1 border-l border-gray-100 cursor-pointer"
+                        title="ডাটাবেসPreset মুছুন"
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* List copy recipients */}
+            {copyRecipients.length > 0 && (
+              <div className="mt-4 space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                {copyRecipients.map((cr, idx) => (
+                  <div key={cr.id} className="flex justify-between items-center bg-white p-2 border border-gray-150 rounded text-xs">
+                    <span>
+                      <strong className="font-mono text-gray-400 mr-2">{countToBangla(idx + 1)}.</strong>
+                      {cr.recipient_name}
+                      {cr.designation && `, ${cr.designation}`}
+                      {cr.organization && `, ${cr.organization}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeCopyRecipient(cr.id)}
+                      className="text-red-500 hover:text-red-700 transition"
+                      title="মুছুন"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+
+        {/* RIGHT CARD: CONFIGURATION, MEMO LAYOUTS, RECIPIENTS */}
+        <div className="space-y-6">
+          {/* METADATA BLOCK */}
+          <div className="bg-white p-6 rounded-lg border border-gray-100 shadow-xs space-y-4">
+            <h2 className="text-md font-bold text-gray-800 border-b border-gray-100 pb-2 flex items-center gap-2">
+              <Layers size={16} className="text-[#006A4E]" />
+              দাপ্তরিক সংযোগ
+            </h2>
+
+            {/* Link to File */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">নথি ফাইল নির্বাচন (Nothi/File) *</label>
+              
+              {selectedFileId ? (
+                (() => {
+                  const f = files.find(x => x.id === selectedFileId);
+                  return f ? (
+                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-lg p-3 relative flex flex-col space-y-1">
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs font-bold text-gray-800 flex items-center gap-1">
+                          <Folder size={13} className="text-[#006A4E]" />
+                          {f.file_title}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFileId('')}
+                          className="text-gray-400 hover:text-red-500 transition cursor-pointer"
+                          title="নির্বাচন বাতিল করুন"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <span className="text-[11px] font-mono text-gray-500 font-medium">ফাইল কোড: {countToBangla(f.file_code)} (বছর: {countToBangla(f.opening_year)})</span>
+                    </div>
+                  ) : null;
+                })()
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFileSearchQuery('');
+                    setActiveFileTab('existing');
+                    setFileModalOpen(true);
+                  }}
+                  className="w-full py-2.5 border border-dashed border-gray-200 hover:border-[#006A4E] text-xs font-semibold text-[#006A4E] hover:bg-emerald-50/20 rounded-lg text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <FolderPlus size={14} />
+                  নথি ফাইল নির্বাচন করুন
+                </button>
+              )}
+              <p className="text-[10px] text-gray-400 mt-1">চিঠিটি যে ক্যাটালগ নথির অধীনে সংরক্ষিত থাকবে।</p>
+            </div>
+
+            {/* Recipient Link (Standard letter mode mandatory) */}
+            {letterType === 'standard' && (
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">প্রাপক নির্বাচন (Recipient) *</label>
+                
+                {/* Selected Recipient Card */}
+                {selectedRecipientId ? (
+                  (() => {
+                    const r = recipients.find(x => x.id === selectedRecipientId);
+                    return r ? (
+                      <div className="bg-emerald-50/50 border border-emerald-100 rounded-lg p-3 relative flex flex-col space-y-1">
+                        <div className="flex justify-between items-start">
+                          <span className="text-xs font-bold text-gray-800 flex items-center gap-1">
+                            <User size={13} className="text-[#006A4E]" />
+                            {r.recipient_name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedRecipientId('')}
+                            className="text-gray-400 hover:text-red-500 transition cursor-pointer"
+                            title="নির্বাচন বাতিল করুন"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        {r.designation && (
+                          <span className="text-[11px] text-gray-600 font-medium">পদবি: {r.designation}</span>
+                        )}
+                        {r.organization && (
+                          <span className="text-[11px] text-gray-600 font-medium flex items-center gap-1">
+                            <Building size={11} className="text-gray-400" />
+                            {r.organization}
+                          </span>
+                        )}
+                        {r.address && (
+                          <span className="text-[10px] text-gray-500 flex items-center gap-1">
+                            <MapPin size={10} className="text-gray-400" />
+                            ঠিকানা: {r.address}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRecipientSearchQuery('');
+                            setActiveRecipientTab('existing');
+                            setRecipientModalOpen(true);
+                          }}
+                          className="mt-2 text-right text-[10px] text-[#006A4E] hover:underline font-bold self-end cursor-pointer"
+                        >
+                          প্রাপক পরিবর্তন করুন
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center">
+                        <p className="text-xs text-gray-500">নির্বাচিত প্রাপক পাওয়া যায়নি বা মুছে ফেলা হয়েছে।</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRecipientSearchQuery('');
+                            setActiveRecipientTab('existing');
+                            setRecipientModalOpen(true);
+                          }}
+                          className="mt-2 text-xs font-bold bg-[#006A4E] text-white px-3 py-1.5 rounded-lg hover:bg-opacity-90 transition inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Search size={12} />
+                          প্রাপক নির্বাচন করুন
+                        </button>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="border border-dashed border-gray-300 rounded-lg p-5 text-center bg-gray-50/50">
+                    <p className="text-xs text-gray-500">কোনো প্রাপক নির্বাচন করা হয়নি।</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecipientSearchQuery('');
+                        setActiveRecipientTab('existing');
+                        setRecipientModalOpen(true);
+                      }}
+                      className="mt-3 text-xs font-bold bg-[#006A4E] text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <UserPlus size={14} />
+                      প্রাপক নির্বাচন বা সংযুক্তি
+                    </button>
+                  </div>
+                )}
+
+                {selectedRecipientId && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2 mt-2">
+                    <span className="block text-[11px] font-bold text-gray-700">চিঠিতে প্রদর্শনের ক্ষেত্রসমূহ (Recipient Display Fields):</span>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          checked={showName} 
+                          onChange={(e) => setShowName(e.target.checked)}
+                          className="rounded border-gray-300 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        প্রাপকের নাম (Name)
+                      </label>
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          checked={showDesignation} 
+                          onChange={(e) => setShowDesignation(e.target.checked)}
+                          className="rounded border-gray-300 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        পদবি (Designation)
+                      </label>
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          checked={showOrganization} 
+                          onChange={(e) => setShowOrganization(e.target.checked)}
+                          className="rounded border-gray-300 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        দপ্তর/প্রতিষ্ঠান (Organization)
+                      </label>
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          checked={showAddress} 
+                          onChange={(e) => setShowAddress(e.target.checked)}
+                          className="rounded border-gray-300 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        ঠিকানা (Address)
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[10px] text-gray-400 font-medium">চিঠিতে শুধুমাত্র নির্বাচিত তথ্য সম্বলিত অংশ থাকবে। নাম ছাড়া কেবল পদবি ও ঠিকানায় চিঠি ইস্যু করা সম্ভব।</p>
+              </div>
+            )}
+
+            {/* Issue Date */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">চিঠি ইস্যু করার তারিখ (Date)</label>
+              <input
+                type="date"
+                value={issueDate}
+                onChange={(e) => setIssueDate(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E] text-gray-700"
+              />
+            </div>
+
+            {/* Notes / References */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">সূত্র / অতিরিক্ত মন্তব্য (References/Notes)</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="প্রয়োজনীয় সূত্র বা দাপ্তরিক সংকেত উল্লেখ থাকলে এখানে লিখুন (ঐচ্ছিক)"
+                className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none font-sans"
+                rows={2}
+              />
+            </div>
+          </div>
+
+          {/* GOVERNMENT SWAY MEMO LIVE GENERATOR PREVIEW */}
+          <div className="bg-white p-6 rounded-lg border border-gray-100 shadow-xs space-y-4">
+            <h2 className="text-md font-bold text-gray-800 border-b border-gray-100 pb-2 block">স্বয়ংক্রিয় স্মারক নম্বর (Auto Memo No)</h2>
+            
+            {loadingMemo ? (
+              <p className="text-xs text-indigo-600 animate-pulse">স্মারক নম্বর যাচাই করা হচ্ছে...</p>
+            ) : memoNo ? (
+              <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-lg">
+                <span className="block text-[10px] font-bold text-[#006A4E] mb-1">প্রস্তাবিত স্মারক সংখ্যা:</span>
+                <span className="font-mono text-sm font-bold text-gray-800 tracking-tight leading-loose block select-all">
+                  {countToBangla(memoNo)}
+                </span>
+                <span className="block text-[9px] text-[#006A4E] font-medium mt-2">
+                  বিন্যাস: মন্ত্রণালয়.দপ্তর.জিও.উপ-দপ্তর.শাখা.শ্রেণি.নথি.বছর.ক্রমিক
+                </span>
+              </div>
+            ) : (
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-500">
+                স্মারক নম্বর দেখতে অনুগ্রহ করে ফাইল (Nothi) নির্বাচন করুন।
+              </div>
+            )}
+          </div>
+
+          {/* SIGNATORY SELECTION PREVIEW */}
+          <div className="bg-white p-6 rounded-lg border border-gray-100 shadow-xs space-y-3">
+            <h2 className="text-md font-bold text-gray-800 border-b border-gray-100 pb-2 flex justify-between items-center">
+              <span>চিঠির স্বাক্ষরকারী (Signatory) *</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOfficerSearchQuery('');
+                  setActiveOfficerTab('existing');
+                  setOfficerModalOpen(true);
+                }}
+                className="text-xs text-[#006A4E] hover:underline font-bold"
+              >
+                পরিবর্তন / নির্বাচন করুন
+              </button>
+            </h2>
+
+            {selectedSignatoryId ? (
+              (() => {
+                const o = officers.find(x => x.id === selectedSignatoryId);
+                if (!o) return null;
+                return (
+                  <div className="flex items-center gap-3 bg-emerald-50/20 border border-emerald-100 p-3 rounded-lg relative">
+                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-[#006A4E] font-bold">
+                      <User size={18} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-gray-800">{o.name}</p>
+                      <p className="text-xs text-gray-500">{o.designation}</p>
+                      {o.phone && <p className="text-[10px] text-gray-400 font-mono">মোবাইল: {countToBangla(o.phone)}</p>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSignatoryId('')}
+                      className="text-gray-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50"
+                      title="ডিফল্ট ব্যবহার করুন"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  {profile?.signature_image ? (
+                    <img 
+                      src={profile.signature_image} 
+                      alt="সাক্ষর" 
+                      className="w-12 h-12 rounded border border-gray-150 object-contain p-0.5 bg-gray-50 flex-shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center text-xs text-gray-400 font-bold border border-gray-150">
+                      সাক্ষর
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-sm font-bold text-gray-800">{profile?.name || 'কর্মকর্তার নাম'} (ডিফল্ট)</p>
+                    <p className="text-xs text-gray-500">{profile?.designation || 'পদবি'}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">কোনো নির্দিষ্ট স্বাক্ষরকারী অফিসার নির্বাচিত নেই।</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOfficerSearchQuery('');
+                    setActiveOfficerTab('existing');
+                    setOfficerModalOpen(true);
+                  }}
+                  className="w-full py-2 border border-dashed border-gray-200 text-xs font-semibold text-[#006A4E] hover:bg-emerald-50/20 rounded-lg text-center transition cursor-pointer"
+                >
+                  অন্য স্বাক্ষরকারী অফিসার নির্বাচন করুন
+                </button>
+              </div>
+            )}
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* RECIPIENT SELECTION MODAL */}
+      {recipientModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-100">
+              <h3 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                <UserPlus size={18} className="text-[#006A4E]" />
+                প্রাপক নির্বাচন ও সংযুক্তি
+              </h3>
+              <button
+                type="button"
+                onClick={() => setRecipientModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Tabs Header */}
+            <div className="flex border-b border-gray-100 bg-gray-50/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveRecipientTab('existing');
+                  setModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeRecipientTab === 'existing'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                বিদ্যমান প্রাপক তালিকা ({recipients.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveRecipientTab('new');
+                  setModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeRecipientTab === 'new'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                নতুন প্রাপক সংযুক্তি
+              </button>
+            </div>
+
+            {/* Modal Content Space */}
+            <div className="p-4 overflow-y-auto flex-1">
+              
+              {modalError && (
+                <div className="mb-3 p-2.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium">
+                  {modalError}
+                </div>
+              )}
+
+              {/* TAB 1: EXISTING LIST */}
+              {activeRecipientTab === 'existing' && (
+                <div className="space-y-4">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      value={recipientSearchQuery}
+                      onChange={(e) => setRecipientSearchQuery(e.target.value)}
+                      placeholder="নাম, পদবি বা প্রতিষ্ঠান দিয়ে খুঁজুন..."
+                      className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  {/* List of Recipients */}
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {(() => {
+                      const filtered = recipients.filter(r => 
+                        (r.recipient_name || '').toLowerCase().includes(recipientSearchQuery.toLowerCase()) ||
+                        (r.designation || '').toLowerCase().includes(recipientSearchQuery.toLowerCase()) ||
+                        (r.organization || '').toLowerCase().includes(recipientSearchQuery.toLowerCase())
+                      );
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-gray-500">
+                            <p className="text-xs">কোনো প্রাপক পাওয়া যায়নি।</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveRecipientTab('new');
+                                setRecipientSearchQuery('');
+                              }}
+                              className="mt-2 text-xs text-[#006A4E] font-bold hover:underline cursor-pointer"
+                            >
+                              নতুন প্রাপক এন্টি করুন →
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return filtered.map(r => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedRecipientId(r.id);
+                            setRecipientModalOpen(false);
+                          }}
+                          className={`w-full text-left p-3 rounded-lg border transition flex flex-col text-xs space-y-1 hover:border-[#006A4E] hover:bg-emerald-50/20 cursor-pointer ${
+                            selectedRecipientId === r.id
+                              ? 'border-[#006A4E] bg-emerald-50/30 font-semibold'
+                              : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center w-full">
+                            <span className="font-bold text-gray-800">{r.recipient_name}</span>
+                            {selectedRecipientId === r.id && (
+                              <span className="text-[10px] text-white bg-[#006A4E] px-1.5 py-0.5 rounded font-bold">নির্বাচিত</span>
+                            )}
+                          </div>
+                          {r.designation && (
+                            <span className="text-gray-500 font-medium">পদবি: {r.designation}</span>
+                          )}
+                          {(r.organization || r.address) && (
+                            <span className="text-gray-400 text-[10px]">
+                              {r.organization || ''} {r.organization && r.address ? ' | ' : ''} {r.address || ''}
+                            </span>
+                          )}
+                          {(r.email || r.mobile) && (
+                            <div className="flex items-center gap-3 text-[9px] text-gray-400 pt-1 border-t border-dashed border-gray-100 mt-1">
+                              {r.mobile && (
+                                <span className="flex items-center gap-0.5 font-mono">
+                                  <Phone size={8} />
+                                  {r.mobile}
+                                </span>
+                              )}
+                              {r.email && (
+                                <span className="flex items-center gap-0.5">
+                                  <Mail size={8} />
+                                  {r.email}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: CREATE NEW FORM */}
+              {activeRecipientTab === 'new' && (
+                <form onSubmit={handleAddNewRecipient} className="space-y-3 pb-2">
+                  
+                  {/* Name field */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">প্রাপকের নাম (বাংলায়) *</label>
+                    <input
+                      type="text"
+                      value={newRecName}
+                      onChange={(e) => setNewRecName(e.target.value)}
+                      placeholder="উদা: ড. মো: আব্দুর রহমান"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  {/* Designation */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">পদবি (Designation)</label>
+                    <input
+                      type="text"
+                      value={newRecDesignation}
+                      onChange={(e) => setNewRecDesignation(e.target.value)}
+                      placeholder="উদা: উপজেলা নির্বাহী অফিসার"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  {/* Organization */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">দপ্তর/প্রতিষ্ঠান (Organization)</label>
+                    <input
+                      type="text"
+                      value={newRecOrg}
+                      onChange={(e) => setNewRecOrg(e.target.value)}
+                      placeholder="উদা: উপজেলা নির্বাহী কর্মকর্তার কার্যালয়"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  {/* Address */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">পূর্ণ ঠিকানা *</label>
+                    <input
+                      type="text"
+                      value={newRecAddress}
+                      onChange={(e) => setNewRecAddress(e.target.value)}
+                      placeholder="উদা: কালিয়াকৈর, গাজীপুর।"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Mobile */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">মোবাইল নম্বর</label>
+                      <input
+                        type="text"
+                        value={newRecMobile}
+                        onChange={(e) => setNewRecMobile(e.target.value)}
+                        placeholder="উদা: ০১৭xxxxxxxx"
+                        className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E] font-mono"
+                      />
+                    </div>
+
+                    {/* Email */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">ইমেইল</label>
+                      <input
+                        type="email"
+                        value={newRecEmail}
+                        onChange={(e) => setNewRecEmail(e.target.value)}
+                        placeholder="example@gmail.com"
+                        className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-3 flex justify-end gap-2 border-t border-gray-100 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveRecipientTab('existing');
+                        setModalError('');
+                      }}
+                      className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      বাতিল
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingNewRecipient}
+                      className="px-4 py-2 bg-[#006A4E] hover:bg-opacity-90 disabled:bg-gray-300 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      {savingNewRecipient ? 'সংরক্ষণ হচ্ছে...' : 'সংরক্ষণ ও সিলেক্ট করুন'}
+                    </button>
+                  </div>
+
+                </form>
+              )}
+
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* SIGNATORY OFFICER SELECTION MODAL */}
+      {officerModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-100">
+              <h3 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                <UserPlus size={18} className="text-[#006A4E]" />
+                স্বাক্ষরকারী অফিসার নির্বাচন ও সংযুক্তি
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOfficerModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Tabs Header */}
+            <div className="flex border-b border-gray-100 bg-gray-50/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveOfficerTab('existing');
+                  setModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeOfficerTab === 'existing'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                বিদ্যমান অফিসার তালিকা ({officers.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveOfficerTab('new');
+                  setModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeOfficerTab === 'new'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                নতুন অফিসার সংযুক্তি
+              </button>
+            </div>
+
+            {/* Modal Content Space */}
+            <div className="p-4 overflow-y-auto flex-1">
+              
+              {modalError && (
+                <div className="mb-3 p-2.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium">
+                  {modalError}
+                </div>
+              )}
+
+              {/* TAB 1: EXISTING LIST */}
+              {activeOfficerTab === 'existing' && (
+                <div className="space-y-4">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      value={officerSearchQuery}
+                      onChange={(e) => setOfficerSearchQuery(e.target.value)}
+                      placeholder="নাম বা পদবি দিয়ে খুঁজুন..."
+                      className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  {/* List of Officers */}
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {(() => {
+                      const filtered = officers.filter(o => 
+                        (o.name || '').toLowerCase().includes(officerSearchQuery.toLowerCase()) ||
+                        (o.designation || '').toLowerCase().includes(officerSearchQuery.toLowerCase())
+                      );
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-gray-500">
+                            <p className="text-xs">কোনো অফিসার কর্মকর্তা পাওয়া যায়নি।</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveOfficerTab('new');
+                                setOfficerSearchQuery('');
+                              }}
+                              className="mt-2 text-xs text-[#006A4E] font-bold hover:underline cursor-pointer"
+                            >
+                              নতুন অফিসার এন্ট্রি করুন →
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return filtered.map(o => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSignatoryId(o.id);
+                            setOfficerModalOpen(false);
+                          }}
+                          className={`w-full text-left p-3 rounded-lg border transition flex flex-col text-xs space-y-1 hover:border-[#006A4E] hover:bg-emerald-50/20 cursor-pointer ${
+                            selectedSignatoryId === o.id
+                              ? 'border-[#006A4E] bg-emerald-50/30 font-semibold'
+                              : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center w-full">
+                            <span className="font-bold text-gray-800">{o.name}</span>
+                            {selectedSignatoryId === o.id && (
+                              <span className="text-[10px] text-white bg-[#006A4E] px-1.5 py-0.5 rounded font-bold">নির্বাচিত</span>
+                            )}
+                          </div>
+                          <span className="text-gray-500 font-medium">পদবি: {o.designation}</span>
+                          {o.phone && (
+                            <span className="text-gray-400 text-[10px] font-mono">মোবাইল: {countToBangla(o.phone)}</span>
+                          )}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: CREATE NEW FORM */}
+              {activeOfficerTab === 'new' && (
+                <form onSubmit={handleAddNewOfficer} className="space-y-3 pb-2">
+                  
+                  {/* Name field */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">অফিসারের নাম (বাংলায়) *</label>
+                    <input
+                      type="text"
+                      value={newOffName}
+                      onChange={(e) => setNewOffName(e.target.value)}
+                      placeholder="উদা: জনাব মোঃ রিয়াজুল ইসলাম"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  {/* Designation */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">পদবি (Designation) *</label>
+                    <input
+                      type="text"
+                      value={newOffDesignation}
+                      onChange={(e) => setNewOffDesignation(e.target.value)}
+                      placeholder="উদা: সহকারী পরিচালক"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Phone */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">মোবাইল নম্বর</label>
+                      <input
+                        type="text"
+                        value={newOffPhone}
+                        onChange={(e) => setNewOffPhone(e.target.value)}
+                        placeholder="উদা: ০১৭xxxxxxxx"
+                        className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E] font-mono"
+                      />
+                    </div>
+
+                    {/* Email */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">ইমেইল</label>
+                      <input
+                        type="email"
+                        value={newOffEmail}
+                        onChange={(e) => setNewOffEmail(e.target.value)}
+                        placeholder="example@gmail.com"
+                        className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Status */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">অবস্থা (স্টেটাস)</label>
+                    <select
+                      value={newOffActive ? 'true' : 'false'}
+                      onChange={(e) => setNewOffActive(e.target.value === 'true')}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none"
+                    >
+                      <option value="true">সক্রিয় (Active)</option>
+                      <option value="false">নিষ্ক্রিয় (Inactive)</option>
+                    </select>
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-3 flex justify-end gap-2 border-t border-gray-100 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveOfficerTab('existing');
+                        setModalError('');
+                      }}
+                      className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      বাতিল
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingNewOfficer}
+                      className="px-4 py-2 bg-[#006A4E] hover:bg-opacity-90 disabled:bg-gray-300 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      {savingNewOfficer ? 'সংরক্ষণ হচ্ছে...' : 'সংরক্ষণ ও সিলেক্ট করুন'}
+                    </button>
+                  </div>
+
+                </form>
+              )}
+
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* NOTHI FILE SELECTION MODAL */}
+      {fileModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-100">
+              <h3 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                <FolderPlus size={18} className="text-[#006A4E]" />
+                নথি ফাইল নির্বাচন ও সংযুক্তি
+              </h3>
+              <button
+                type="button"
+                onClick={() => setFileModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Tabs Header */}
+            <div className="flex border-b border-gray-100 bg-gray-50/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveFileTab('existing');
+                  setModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeFileTab === 'existing'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                বিদ্যমান নথি তালিকা ({files.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveFileTab('new');
+                  setModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeFileTab === 'new'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                নতুন নথি ফাইল সংযুক্তি
+              </button>
+            </div>
+
+            {/* Modal Content Space */}
+            <div className="p-4 overflow-y-auto flex-1">
+              
+              {modalError && (
+                <div className="mb-3 p-2.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium">
+                  {modalError}
+                </div>
+              )}
+
+              {/* TAB 1: EXISTING LIST */}
+              {activeFileTab === 'existing' && (
+                <div className="space-y-4">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      value={fileSearchQuery}
+                      onChange={(e) => setFileSearchQuery(e.target.value)}
+                      placeholder="নথির নাম বা কোড দিয়ে খুঁজুন..."
+                      className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  {/* List of Files */}
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {(() => {
+                      const filtered = files.filter(f => 
+                        (f.file_title || '').toLowerCase().includes(fileSearchQuery.toLowerCase()) ||
+                        (f.file_code || '').toLowerCase().includes(fileSearchQuery.toLowerCase())
+                      );
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-gray-500">
+                            <p className="text-xs">কোনো নথি পাওয়া যায়নি।</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveFileTab('new');
+                                setFileSearchQuery('');
+                              }}
+                              className="mt-2 text-xs text-[#006A4E] font-bold hover:underline cursor-pointer"
+                            >
+                              নতুন নথি ফাইল এন্ট্রি করুন →
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return filtered.map(f => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedFileId(f.id);
+                            setFileModalOpen(false);
+                          }}
+                          className={`w-full text-left p-3 rounded-lg border transition flex flex-col text-xs space-y-1 hover:border-[#006A4E] hover:bg-emerald-50/20 cursor-pointer ${
+                            selectedFileId === f.id
+                              ? 'border-[#006A4E] bg-emerald-50/30 font-semibold'
+                              : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center w-full">
+                            <span className="font-bold text-gray-800 flex items-center gap-1">
+                              <Folder size={12} className="text-[#006A4E]" />
+                              {f.file_title}
+                            </span>
+                            {selectedFileId === f.id && (
+                              <span className="text-[10px] text-white bg-[#006A4E] px-1.5 py-0.5 rounded font-bold">selected</span>
+                            )}
+                          </div>
+                          <div className="flex justify-between text-gray-500 font-medium text-[11px] pt-1">
+                            <span>কোড: {countToBangla(f.file_code)}</span>
+                            <span>বছর: {countToBangla(f.opening_year)}</span>
+                          </div>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: CREATE NEW FORM */}
+              {activeFileTab === 'new' && (
+                <form onSubmit={handleAddNewFile} className="space-y-3 pb-2">
+                  
+                  {/* File Title */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">নথি ফাইলের বিষয়/শিরোনাম (বাংলায়) *</label>
+                    <input
+                      type="text"
+                      value={newFileTitle}
+                      onChange={(e) => setNewFileTitle(e.target.value)}
+                      placeholder="উদা: কর্মকর্তা/কর্মচারীদের প্রশিক্ষণ বিষয়ক ফাইল"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* File Code */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">ফাইলের সূচক কোড সংখ্যা (বাংলা/ইংরেজী) *</label>
+                      <input
+                        type="text"
+                        value={newFileCode}
+                        onChange={(e) => setNewFileCode(e.target.value)}
+                        placeholder="উদা: ১০৫"
+                        className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E] font-mono"
+                        required
+                      />
+                    </div>
+
+                    {/* Opening Year */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">ফাইলের সূচনা বছর (২ ডিজিট) *</label>
+                      <input
+                        type="text"
+                        value={newFileOpeningYear}
+                        onChange={(e) => setNewFileOpeningYear(e.target.value)}
+                        placeholder="উদা: ২৬ (2026-এর জন্য)"
+                        className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E] font-mono"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Subject Classification (dropdown) */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">নথির মূল বিভাগ (শ্রেণিবিভাগ)</label>
+                    <select
+                      value={newFileClassificationId}
+                      onChange={(e) => setNewFileClassificationId(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    >
+                      <option value="">নির্বাচন করুন...</option>
+                      {classifications.map(c => (
+                        <option key={c.id} value={c.id}>{c.title} ({c.code})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">অতিরিক্ত বিবরণ/টিকা (Description)</label>
+                    <textarea
+                      value={newFileDescription}
+                      onChange={(e) => setNewFileDescription(e.target.value)}
+                      placeholder="নথি ফাইলের উদ্দেশ্য বা বিবরণ"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none font-sans"
+                      rows={2}
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-3 flex justify-end gap-2 border-t border-gray-100 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFileTab('existing');
+                        setModalError('');
+                      }}
+                      className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      বাতিল
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingNewFile}
+                      className="px-4 py-2 bg-[#006A4E] hover:bg-opacity-90 disabled:bg-gray-300 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      {savingNewFile ? 'সংরক্ষণ হচ্ছে...' : 'সংরক্ষণ ও সিলেক্ট করুন'}
+                    </button>
+                  </div>
+
+                </form>
+              )}
+
+            </div>
+
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}

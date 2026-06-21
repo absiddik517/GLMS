@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Bengali:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans Bengali", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply antialiased bg-gray-50 text-gray-800 selection:bg-[#006A4E]/20 selection:text-[#006A4E];
+  }
+}
+
+/* Custom print breaks layout styling */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}
+
+.page-break {
+  page-break-after: always;
+}

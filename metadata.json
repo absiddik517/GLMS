@@ -1,0 +1,6 @@
+{
+  "name": "Government Letter Management System",
+  "description": "Government Letter Management System (GLMS) for Bangladesh Government Offices to create, manage, archive, search, and print official government letters.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
