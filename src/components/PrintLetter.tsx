@@ -74,29 +74,29 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       </div>
 
       {/* 2. MEMO NUMBER AND DATE SECTION */}
-      <div className="flex justify-between items-start text-xs pb-3 mb-6 select-none leading-relaxed text-black">
-        <div className="w-3/5 font-semibold text-black">
+      <div className="flex justify-between items-start text-xs pb-3 mb-6 select-none leading-relaxed text-black gap-4">
+        <div className="flex-1 font-semibold text-black">
           স্মারক নম্বর: <span className="font-mono text-xs text-black">{countToBangla(letter.memo_no)}</span>
         </div>
-        <div className="w-2/5 text-right font-semibold text-black">
+        <div className="text-right font-semibold text-black shrink-0">
           তারিখ: <span className="font-sans text-black">{getGovtFormattedDate(letter.issue_date)}</span>
         </div>
       </div>
 
       {/* 3. TYPE HEADINGS (Center title for specific letter types like notice, circular, office order) */}
       {headerTitle && (
-        <div className="text-center font-bold text-lg pb-1 mb-6 text-black border-b border-black">
+        <div className="text-center font-bold text-lg pb-1 mb-6 text-black">
           {headerTitle}
         </div>
       )}
 
       {/* 5. SUBJECT AND REFERENCE (Hide if Office Order) */}
       {letter.letter_type !== 'office_order' && letter.subject && (
-        <div className="mb-6 text-sm leading-relaxed text-black" id="subject-print-block">
+        <div className="mb-2 text-sm leading-relaxed text-black" id="subject-print-block">
           <p className="font-bold text-black">
             বিষয়: <span className="underline font-semibold text-black">{letter.subject}</span>
           </p>
-          {letter.notes && letter.letter_type === 'standard' && (
+          {letter.notes && letter.notes.trim() && letter.letter_type === 'standard' && (
             <p className="text-xs text-black mt-1">
               সূত্র: {letter.notes}
             </p>
@@ -106,7 +106,7 @@ export default function PrintLetter({ letter, profile, office, recipient, office
 
       {/* 6. MAIN BODY (TipTap/HTML render) */}
       <div 
-        className="text-sm leading-relaxed text-black min-h-[250px] mb-6 prose prose-slate max-w-none prose-sm"
+        className="text-sm leading-relaxed text-black mb-6 prose prose-slate max-w-none prose-sm"
         dangerouslySetInnerHTML={{ __html: letter.body }}
         style={{ textAlign: 'justify', color: '#000000' }}
       ></div>
@@ -145,21 +145,9 @@ export default function PrintLetter({ letter, profile, office, recipient, office
 
         {/* Signatory on the Right Column */}
         <div className="text-right text-sm leading-snug text-black">
+          <div className="h-16"></div>
           {selectedOfficer ? (
             <>
-              {selectedOfficer.signature_image || profile?.signature_image ? (
-                <div className="flex justify-end mb-1">
-                  <img 
-                    src={selectedOfficer.signature_image || profile.signature_image} 
-                    alt="সাক্ষর" 
-                    className="max-h-12 max-w-[150px] object-contain"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-              ) : (
-                <div className="h-12"></div>
-              )}
-              
               <p className="font-bold text-black">{selectedOfficer.name}</p>
               <p className="text-xs text-black font-semibold">{selectedOfficer.designation}</p>
               <p className="text-xs text-black">{office?.office_name || 'দপ্তর'}</p>
@@ -169,49 +157,14 @@ export default function PrintLetter({ letter, profile, office, recipient, office
               ) : office?.phone ? (
                 <p className="text-xs text-black">ফোন: {countToBangla(office.phone)}</p>
               ) : null}
-              
-              {selectedOfficer.seal_image || profile?.seal_image ? (
-                <div className="flex justify-end mt-2">
-                  <img 
-                    src={selectedOfficer.seal_image || profile.seal_image} 
-                    alt="সীলা" 
-                    className="max-h-14 max-w-[120px] object-contain opacity-95 border border-transparent"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-              ) : null}
             </>
           ) : (
             <>
-              {profile?.signature_image ? (
-                <div className="flex justify-end mb-1">
-                  <img 
-                    src={profile.signature_image} 
-                    alt="সাক্ষর" 
-                    className="max-h-12 max-w-[150px] object-contain"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-              ) : (
-                <div className="h-12"></div>
-              )}
-              
               <p className="font-bold text-black">{profile?.name || 'কর্মকর্তার নাম'}</p>
               <p className="text-xs text-black font-semibold">{profile?.designation || 'পদবি'}</p>
               <p className="text-xs text-black">{office?.office_name || 'দপ্তর'}</p>
               
               {office?.phone && <p className="text-xs text-black">ফোন: {countToBangla(office.phone)}</p>}
-              
-              {profile?.seal_image && (
-                <div className="flex justify-end mt-2">
-                  <img 
-                    src={profile.seal_image} 
-                    alt="সীলা" 
-                    className="max-h-14 max-w-[120px] object-contain opacity-95 border border-transparent"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-              )}
             </>
           )}
         </div>
@@ -219,7 +172,7 @@ export default function PrintLetter({ letter, profile, office, recipient, office
 
       {/* 8. COPY RECIPIENTS SECTION (If any exist) */}
       {letter.copy_recipients && letter.copy_recipients.length > 0 && (
-        <div className="mt-12 pt-4 border-t border-black text-xs text-black leading-relaxed select-none" id="copy-rec-print-block">
+        <div className="mt-12 pt-4 text-xs text-black leading-relaxed select-none" id="copy-rec-print-block">
           <p className="font-bold underline mb-1 text-black">অনুলিপি জ্ঞাতার্থে ও কার্যার্থে প্রেরিত হলো:</p>
           <ol className="list-decimal pl-5 text-black">
             {letter.copy_recipients.map((cr, idx) => (

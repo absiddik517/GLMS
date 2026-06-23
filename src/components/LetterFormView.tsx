@@ -75,6 +75,8 @@ export default function LetterFormView({
     letter?.recipient_display_options?.show_address !== false
   );
 
+  const [isFirstLoadSelected, setIsFirstLoadSelected] = useState(true);
+
   // For copy recipients additions
   const [newCopyName, setNewCopyName] = useState('');
   const [newCopyDesignation, setNewCopyDesignation] = useState('');
@@ -96,6 +98,10 @@ export default function LetterFormView({
   const [newRecAddress, setNewRecAddress] = useState('');
   const [newRecMobile, setNewRecMobile] = useState('');
   const [newRecEmail, setNewRecEmail] = useState('');
+  const [newRecShowName, setNewRecShowName] = useState(true);
+  const [newRecShowDesignation, setNewRecShowDesignation] = useState(true);
+  const [newRecShowOrganization, setNewRecShowOrganization] = useState(true);
+  const [newRecShowAddress, setNewRecShowAddress] = useState(true);
   const [savingNewRecipient, setSavingNewRecipient] = useState(false);
   // For selecting officers via Modal
   const [selectedSignatoryId, setSelectedSignatoryId] = useState(letter?.signatory_officer_id || '');
@@ -180,6 +186,25 @@ export default function LetterFormView({
     }
   }, [letterType]);
 
+  // Load default display options when recipient is loaded or selected
+  useEffect(() => {
+    if (selectedRecipientId) {
+      if (isFirstLoadSelected && letter?.recipient_display_options) {
+        // Keep the saved letter selections on first load
+        setIsFirstLoadSelected(false);
+        return;
+      }
+      setIsFirstLoadSelected(false);
+      const rec = recipients.find(r => r.id === selectedRecipientId);
+      if (rec) {
+        setShowName(rec.show_name !== false);
+        setShowDesignation(rec.show_designation !== false);
+        setShowOrganization(rec.show_organization !== false);
+        setShowAddress(rec.show_address !== false);
+      }
+    }
+  }, [selectedRecipientId, recipients]);
+
   // Add Copy Recipient
   const addCopyRecipient = async () => {
     if (!newCopyName.trim()) return;
@@ -229,12 +254,13 @@ export default function LetterFormView({
     e.preventDefault();
     setModalError('');
     
-    if (!newRecName.trim()) {
-      setModalError('অনুগ্রহ করে প্রাপকের নাম বাংলায় লিখুন।');
-      return;
-    }
     if (!newRecAddress.trim()) {
       setModalError('অনুগ্রহ করে প্রাপকের ঠিকানা বাংলায় লিখুন।');
+      return;
+    }
+
+    if (!newRecName.trim() && !newRecDesignation.trim() && !newRecOrg.trim()) {
+      setModalError('অনুগ্রহ করে প্রাপকের নাম, পদবি অথবা প্রতিষ্ঠান যেকোনো একটি প্রদান করুন।');
       return;
     }
 
@@ -242,12 +268,16 @@ export default function LetterFormView({
     try {
       const addedId = await saveRecipient({
         office_id: office?.id || '',
-        recipient_name: newRecName.trim(),
+        recipient_name: newRecName.trim() || undefined,
         designation: newRecDesignation.trim() || undefined,
         organization: newRecOrg.trim() || undefined,
         address: newRecAddress.trim(),
         mobile: newRecMobile.trim() || undefined,
         email: newRecEmail.trim() || undefined,
+        show_name: newRecShowName,
+        show_designation: newRecShowDesignation,
+        show_organization: newRecShowOrganization,
+        show_address: newRecShowAddress,
       });
 
       setSelectedRecipientId(addedId);
@@ -259,6 +289,10 @@ export default function LetterFormView({
       setNewRecAddress('');
       setNewRecMobile('');
       setNewRecEmail('');
+      setNewRecShowName(true);
+      setNewRecShowDesignation(true);
+      setNewRecShowOrganization(true);
+      setNewRecShowAddress(true);
       setModalError('');
       
       // Close modal
@@ -1118,14 +1152,16 @@ export default function LetterFormView({
                   
                   {/* Name field */}
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">প্রাপকের নাম (বাংলায়) *</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">প্রাপকের নাম (বাংলায়)</label>
+                      <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">ঐচ্ছিক (Optional)</span>
+                    </div>
                     <input
                       type="text"
                       value={newRecName}
                       onChange={(e) => setNewRecName(e.target.value)}
                       placeholder="উদা: ড. মো: আব্দুর রহমান"
                       className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
-                      required
                     />
                   </div>
 
@@ -1189,6 +1225,54 @@ export default function LetterFormView({
                         placeholder="example@gmail.com"
                         className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
                       />
+                    </div>
+                  </div>
+
+                  {/* DISPLAY CONTROLS IN THE PAD */}
+                  <div className="p-2.5 bg-emerald-50/50 border border-emerald-150/70 rounded-lg space-y-1.5">
+                    <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">
+                      চিঠির প্যাডে কোন কোন ক্ষেত্র দৃশ্যমান হবে:
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={newRecShowName}
+                          onChange={(e) => setNewRecShowName(e.target.checked)}
+                          className="rounded border-gray-350 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        নাম দেখান
+                      </label>
+
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={newRecShowDesignation}
+                          onChange={(e) => setNewRecShowDesignation(e.target.checked)}
+                          className="rounded border-gray-350 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        পদবি দেখান
+                      </label>
+
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={newRecShowOrganization}
+                          onChange={(e) => setNewRecShowOrganization(e.target.checked)}
+                          className="rounded border-gray-350 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        প্রতিষ্ঠান দেখান
+                      </label>
+
+                      <label className="flex items-center gap-1.5 font-medium text-gray-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={newRecShowAddress}
+                          onChange={(e) => setNewRecShowAddress(e.target.checked)}
+                          className="rounded border-gray-350 text-[#006A4E] focus:ring-[#006A4E] h-3.5 w-3.5"
+                        />
+                        ঠিকানা দেখান
+                      </label>
                     </div>
                   </div>
 
