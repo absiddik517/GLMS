@@ -101,9 +101,8 @@ export default function PrintLetter({ letter, profile, office, recipient, office
         <div className="flex items-center text-black shrink-0">
           <span className="mr-2 font-semibold text-black">তারিখ:</span>
           <div className="inline-flex flex-col items-center text-center">
-            <div className="px-2 text-xs text-black font-semibold pb-1">{getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ</div>
-            <div className="w-full border-t border-black"></div>
-            <div className="px-2 text-xs text-black font-semibold pt-1">{formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ</div>
+            <div className="px-2 text-xs text-black font-semibold pb-1 border-b border-black w-full">{getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ</div>
+            <div className="px-2 text-xs text-black font-semibold">{formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ</div>
           </div>
         </div>
       </div>
