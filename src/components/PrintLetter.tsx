@@ -1,6 +1,7 @@
 import React from 'react';
 import { Letter, UserProfile, Office, Recipient, Officer } from '../types';
 import { countToBangla, getGovtFormattedDate, getBengaliCalendarDate, formatBanglaDate } from '../utils/banglaHelpers';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface PrintLetterProps {
   letter: Letter;
@@ -37,6 +38,20 @@ export default function PrintLetter({ letter, profile, office, recipient, office
   const selectedOfficer = letter.signatory_officer_id 
     ? officers.find(o => o.id === letter.signatory_officer_id)
     : null;
+
+  const orgNameLine3 = office?.org_name_line3 !== undefined && office?.org_name_line3 !== ''
+    ? office.org_name_line3
+    : (office?.office_name?.includes('ব্যুরো') ? '' : 'উপজেলা উপানুষ্ঠানিক শিক্ষা ব্যুরো');
+
+  const orgAddressLine4 = office?.org_address_line4 || office?.address || 'হালুয়াঘাট, ময়মনসিংহ';
+
+  const qrData = [
+    `প্রতিষ্ঠানের নাম: ${orgNameLine3}`,
+    `প্রতিষ্ঠানের ঠিকানা: ${orgAddressLine4}`,
+    `স্মারক নং: ${countToBangla(letter.memo_no)}`,
+    `তারিখ: ${getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ, ${formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ`,
+    `বিষয়: ${letter.subject || ''}`
+  ].join('\n');
 
   return (
     <div 
@@ -78,12 +93,10 @@ export default function PrintLetter({ letter, profile, office, recipient, office
             {office?.office_name || 'উপজেলা উপানুষ্ঠানিক শিক্ষা কর্মকর্তার কার্যালয়'}
           </h2>
           <p className="text-sm text-black font-semibold leading-tight mt-0.5">
-            {office?.org_name_line3 !== undefined && office?.org_name_line3 !== ''
-              ? office.org_name_line3
-              : (office?.office_name?.includes('ব্যুরো') ? '' : 'উপজেলা উপানুষ্ঠানিক শিক্ষা ব্যুরো')}
+            {orgNameLine3}
           </p>
           <p className="text-xs text-black font-semibold leading-tight mt-0.5">
-            {office?.org_address_line4 || office?.address || 'হালুয়াঘাট, ময়মনসিংহ'}
+            {orgAddressLine4}
           </p>
           {office?.email && (
             <p className="text-xs text-black font-mono tracking-wide mt-0.5">
@@ -101,8 +114,8 @@ export default function PrintLetter({ letter, profile, office, recipient, office
         <div className="flex items-center text-black shrink-0">
           <span className="mr-2 font-semibold text-black">তারিখ:</span>
           <div className="inline-flex flex-col items-center text-center">
-            <div className="px-2 text-xs text-black font-semibold pb-1 border-b border-black w-full">{getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ</div>
-            <div className="px-2 text-xs text-black font-semibold pt-1">{formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ</div>
+            <div className="text-xs text-black font-semibold w-full">{getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ</div>
+            <div className="text-xs text-black font-semibold">{formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ</div>
           </div>
         </div>
       </div>
@@ -230,6 +243,26 @@ export default function PrintLetter({ letter, profile, office, recipient, office
           </div>
         </div>
       )}
+
+      {/* 9. QR CODE SECTION */}
+      <div className="mt-8 pt-4 border-t border-gray-200 flex justify-between items-end select-none" id="qr-code-print-block">
+        <div className="text-[10px] text-gray-500 font-sans leading-relaxed">
+          <p className="font-semibold text-black mb-1">ডিজিটাল যাচাইকরণ তথ্য:</p>
+          <p>প্রতিষ্ঠানের নাম: {orgNameLine3}</p>
+          <p>ঠিকানা: {orgAddressLine4}</p>
+          <p>স্মারক নং: {countToBangla(letter.memo_no)}</p>
+          <p>তারিখ: {getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ / {formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ</p>
+          {letter.subject && <p className="text-black font-semibold">বিষয়: {letter.subject}</p>}
+        </div>
+        <div className="border border-gray-300 p-1.5 bg-white rounded shadow-sm shrink-0 flex items-center justify-center">
+          <QRCodeSVG
+            value={qrData}
+            size={80}
+            level="M"
+            includeMargin={false}
+          />
+        </div>
+      </div>
     </div>
   );
 }
