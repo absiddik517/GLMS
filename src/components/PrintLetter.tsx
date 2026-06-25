@@ -245,22 +245,16 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       )}
 
       {/* 9. QR CODE SECTION */}
-      <div className="mt-8 pt-4 border-t border-gray-200 flex justify-between items-end select-none" id="qr-code-print-block">
-        <div className="text-[10px] text-gray-500 font-sans leading-relaxed">
-          <p className="font-semibold text-black mb-1">ডিজিটাল যাচাইকরণ তথ্য:</p>
-          <p>প্রতিষ্ঠানের নাম: {orgNameLine3}</p>
-          <p>ঠিকানা: {orgAddressLine4}</p>
-          <p>স্মারক নং: {countToBangla(letter.memo_no)}</p>
-          <p>তারিখ: {getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ / {formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ</p>
-          {letter.subject && <p className="text-black font-semibold">বিষয়: {letter.subject}</p>}
-        </div>
-        <div className="border border-gray-300 p-1.5 bg-white rounded shadow-sm shrink-0 flex items-center justify-center">
-          <QRCodeSVG
-            value={qrData}
-            size={80}
-            level="M"
-            includeMargin={false}
-          />
+      <div className="mt-8 flex justify-start items-center select-none gap-3" id="qr-code-print-block">
+        <QRCodeSVG
+          value={qrData}
+          size={60}
+          level="M"
+          includeMargin={false}
+        />
+        <div className="text-[9px] text-gray-500 font-sans leading-tight">
+          <p className="font-semibold text-black">ডিজিটাল যাচাইকরণ কিউআর কোড</p>
+          <p className="text-gray-400">স্মারক নং ও তারিখ যাচাইয়ের জন্য স্ক্যান করুন</p>
         </div>
       </div>
     </div>
