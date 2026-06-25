@@ -119,11 +119,12 @@ export async function createOrGetOffice(officeId: string, defaultData: Partial<O
 }
 
 export async function updateOffice(officeId: string, data: Partial<Office>): Promise<void> {
+  const cleanData = cleanFirestorePayload(data);
   const cached = localStorage.getItem(`office_${officeId}`);
   if (cached) {
     try {
       const officeObj = JSON.parse(cached) as Office;
-      const updated = { ...officeObj, ...data, updated_at: new Date().toISOString() };
+      const updated = { ...officeObj, ...cleanData, updated_at: new Date().toISOString() };
       localStorage.setItem(`office_${officeId}`, JSON.stringify(updated));
     } catch (e) {
       // ignore
@@ -133,11 +134,12 @@ export async function updateOffice(officeId: string, data: Partial<Office>): Pro
   try {
     const docRef = doc(db, 'offices', officeId);
     await updateDoc(docRef, {
-      ...data,
+      ...cleanData,
       updated_at: new Date().toISOString()
     });
   } catch (error) {
-    console.warn(`Failed to update office on server, saved locally:`, error);
+    console.error(`Failed to update office on server:`, error);
+    throw error;
   }
 }
 
@@ -183,7 +185,8 @@ export async function saveUserProfile(profile: UserProfile): Promise<void> {
     const docRef = doc(db, 'users', profile.id);
     await setDoc(docRef, updatedProfile);
   } catch (error) {
-    console.warn(`Failed to save user profile on server, cached locally:`, error);
+    console.error(`Failed to save user profile on server:`, error);
+    throw error;
   }
 }
 

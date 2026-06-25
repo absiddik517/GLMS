@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Settings, Save, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { Office } from '../types';
 
@@ -26,6 +26,22 @@ export default function OfficeSettingsView({
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Sync state when office prop loads or updates
+  useEffect(() => {
+    if (office) {
+      setOfficeName(office.office_name || '');
+      setOfficeCode(office.office_code || '');
+      setGeoCode(office.geo_code || '');
+      setAddress(office.address || '');
+      setEmail(office.email || '');
+      setPhone(office.phone || '');
+      setWebsite(office.website || '');
+      setMinistryCode(office.ministry_code || '০৮');
+      setOrgNameLine3(office.org_name_line3 || '');
+      setOrgAddressLine4(office.org_address_line4 || '');
+    }
+  }, [office]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -24,8 +24,8 @@ import { Letter, NothiFile, Recipient, SubjectClassification, CopyRecipient, Let
 import { useAuth } from '../contexts/AuthContext';
 import Editor from './Editor';
 import { generateNextMemoNumber } from '../utils/memoGenerator';
-import { countToBangla } from '../utils/banglaHelpers';
-import { saveRecipient, saveOfficer, saveFile, saveCopyPreset, deleteCopyPreset } from '../services/store';
+import { countToBangla, padLeft } from '../utils/banglaHelpers';
+import { saveRecipient, saveOfficer, saveFile, saveCopyPreset, deleteCopyPreset, getLetters, saveSubjectClassification } from '../services/store';
 
 interface LetterFormViewProps {
   letter?: Letter; // If editing
@@ -53,6 +53,15 @@ export default function LetterFormView({
   // Form states
   const [letterType, setLetterType] = useState<LetterType>(letter?.letter_type || 'standard');
   const [selectedFileId, setSelectedFileId] = useState(letter?.file_id || '');
+  const [selectedClassificationId, setSelectedClassificationId] = useState(letter?.subject_classification_id || '');
+  const [classificationModalOpen, setClassificationModalOpen] = useState(false);
+  const [activeClassificationTab, setActiveClassificationTab] = useState<'existing' | 'new'>('existing');
+  const [classificationSearchQuery, setClassificationSearchQuery] = useState('');
+  const [newClassificationCode, setNewClassificationCode] = useState('');
+  const [newClassificationTitle, setNewClassificationTitle] = useState('');
+  const [newClassificationDesc, setNewClassificationDesc] = useState('');
+  const [classificationSubmitting, setClassificationSubmitting] = useState(false);
+  const [classificationModalError, setClassificationModalError] = useState('');
   const [selectedRecipientId, setSelectedRecipientId] = useState(letter?.recipient_id || '');
   const [subject, setSubject] = useState(letter?.subject || '');
   const [body, setBody] = useState(letter?.body || '<p>মহোদয়,</p><p>বিনীত নিবেদন এই যে, ...</p>');
@@ -86,6 +95,45 @@ export default function LetterFormView({
   // For attachments additions
   const [attachments, setAttachments] = useState<string[]>(letter?.attachments || []);
   const [newAttachment, setNewAttachment] = useState('');
+  const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
+  const [historyPresets, setHistoryPresets] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function loadHistoryPresets() {
+      if (!office?.id) return;
+      try {
+        const lettersList = await getLetters(office.id);
+        const counts: { [key: string]: number } = {};
+        lettersList.forEach(l => {
+          if (l.attachments && Array.isArray(l.attachments)) {
+            l.attachments.forEach(attach => {
+              const cleaned = attach.trim();
+              if (cleaned) {
+                counts[cleaned] = (counts[cleaned] || 0) + 1;
+              }
+            });
+          }
+        });
+        
+        const sorted = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+        setHistoryPresets(sorted.slice(0, 5));
+      } catch (err) {
+        console.error("Error loading attachment history presets:", err);
+      }
+    }
+    loadHistoryPresets();
+  }, [office?.id]);
+
+  // For copy recipients modal
+  const [copyRecipientModalOpen, setCopyRecipientModalOpen] = useState(false);
+  const [activeCopyRecipientTab, setActiveCopyRecipientTab] = useState<'existing' | 'new'>('existing');
+  const [copyRecipientSearchQuery, setCopyRecipientSearchQuery] = useState('');
+
+  // For issue confirmation modal
+  const [issueConfirmModalOpen, setIssueConfirmModalOpen] = useState(false);
+  const [recentIssuedLetters, setRecentIssuedLetters] = useState<Letter[]>([]);
+  const [modalSerialNo, setModalSerialNo] = useState('');
+  const [modalIssueDate, setModalIssueDate] = useState('');
 
   const addAttachment = () => {
     if (!newAttachment.trim()) return;
@@ -147,7 +195,17 @@ export default function LetterFormView({
 
   const [modalError, setModalError] = useState('');
 
-  // Auto-generate memo when selectedFileId changes
+  // Auto-sync classification on file change
+  useEffect(() => {
+    if (selectedFileId) {
+      const fileObj = files.find(f => f.id === selectedFileId);
+      if (fileObj && fileObj.subject_classification_id) {
+        setSelectedClassificationId(fileObj.subject_classification_id);
+      }
+    }
+  }, [selectedFileId, files]);
+
+  // Auto-generate memo when selectedFileId or selectedClassificationId changes
   useEffect(() => {
     // If we're editing an already issued letter, we do NOT change the memo number!
     if (letter && letter.status === 'issued') {
@@ -167,7 +225,7 @@ export default function LetterFormView({
         const fileObj = files.find(f => f.id === selectedFileId);
         if (!fileObj) return;
 
-        const classObj = classifications.find(c => c.id === fileObj.subject_classification_id);
+        const classObj = classifications.find(c => c.id === (selectedClassificationId || fileObj.subject_classification_id));
 
         const res = await generateNextMemoNumber({
           office,
@@ -175,8 +233,9 @@ export default function LetterFormView({
           file: fileObj
         });
 
-        setMemoNo(res.memo_no);
-        setSerialNo(res.serial_no);
+        const draftMemo = res.memo_no.substring(0, res.memo_no.lastIndexOf('-')) + '-xx';
+        setMemoNo(draftMemo);
+        setSerialNo('');
       } catch (err) {
         console.error("Error auto-generating memo number:", err);
         setErrorText('স্মারক নম্বর সমন্বয় করতে ত্রুটি হয়েছে।');
@@ -186,7 +245,7 @@ export default function LetterFormView({
     };
 
     triggerMemoGen();
-  }, [selectedFileId, letterType, files, classifications, office, letter]);
+  }, [selectedFileId, selectedClassificationId, letterType, files, classifications, office, letter]);
 
   // Clean form defaults depending on type
   useEffect(() => {
@@ -200,6 +259,59 @@ export default function LetterFormView({
       }
     }
   }, [letterType]);
+
+  // Set default signatory officer based on most letters signed
+  useEffect(() => {
+    // Only set default if we are NOT editing a letter with an existing signatory_officer_id
+    if (letter?.signatory_officer_id) {
+      return;
+    }
+
+    async function determineDefaultSignatory() {
+      if (!office?.id || officers.length === 0) return;
+
+      const activeOfficers = officers.filter(o => o.active);
+      if (activeOfficers.length === 0) return;
+
+      try {
+        const lettersList = await getLetters(office.id);
+        
+        // Count letters signed by each active officer
+        const counts: { [key: string]: number } = {};
+        // Initialize counts for all active officers to 0 so we have a fallback
+        activeOfficers.forEach(o => {
+          counts[o.id] = 0;
+        });
+
+        lettersList.forEach(l => {
+          if (l.signatory_officer_id && counts[l.signatory_officer_id] !== undefined) {
+            counts[l.signatory_officer_id] += 1;
+          }
+        });
+
+        // Find the active officer with maximum letters signed
+        let maxCount = -1;
+        let defaultOfficerId = activeOfficers[0].id; // fallback to the first active officer
+
+        activeOfficers.forEach(o => {
+          if (counts[o.id] > maxCount) {
+            maxCount = counts[o.id];
+            defaultOfficerId = o.id;
+          }
+        });
+
+        setSelectedSignatoryId(defaultOfficerId);
+      } catch (err) {
+        console.error("Error determining default signatory:", err);
+        // Fallback to the first active officer if letters fetch fails
+        if (activeOfficers.length > 0) {
+          setSelectedSignatoryId(activeOfficers[0].id);
+        }
+      }
+    }
+
+    determineDefaultSignatory();
+  }, [letter?.signatory_officer_id, office?.id, officers]);
 
   // Load default display options when recipient is loaded or selected
   useEffect(() => {
@@ -413,7 +525,179 @@ export default function LetterFormView({
     }
   };
 
-  // Submission Validation & Save
+  // Add New Subject Classification inside Selector Modal
+  const handleAddNewClassification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setClassificationModalError('');
+
+    if (!newClassificationCode.trim()) {
+      setClassificationModalError('অনুগ্রহ করে শ্রেণি কোড উল্লেখ করুন।');
+      return;
+    }
+    if (!newClassificationTitle.trim()) {
+      setClassificationModalError('অনুগ্রহ করে শ্রেণির নাম উল্লেখ করুন।');
+      return;
+    }
+
+    setClassificationSubmitting(true);
+    try {
+      const addedId = await saveSubjectClassification({
+        office_id: office?.id || '',
+        code: newClassificationCode.trim(),
+        title: newClassificationTitle.trim(),
+        description: newClassificationDesc.trim() || undefined,
+        active: true
+      });
+
+      setSelectedClassificationId(addedId);
+
+      // Clear values
+      setNewClassificationCode('');
+      setNewClassificationTitle('');
+      setNewClassificationDesc('');
+      setClassificationModalError('');
+
+      // Close modal
+      setClassificationModalOpen(false);
+    } catch (err) {
+      console.error("Error inside handleAddNewClassification in Modal:", err);
+      setClassificationModalError('শ্রেণি বিন্যাস সংরক্ষণ করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।');
+    } finally {
+      setClassificationSubmitting(false);
+    }
+  };
+
+  // Helper to construct memo with custom serial
+  const getMemoWithSerial = (baseMemo: string, serial: string) => {
+    const padded = padLeft(serial, 2);
+    if (baseMemo.endsWith('-xx')) {
+      return baseMemo.slice(0, -3) + '-' + padded;
+    }
+    const lastDashIdx = baseMemo.lastIndexOf('-');
+    if (lastDashIdx !== -1) {
+      return baseMemo.substring(0, lastDashIdx) + '-' + padded;
+    }
+    return baseMemo + '-' + padded;
+  };
+
+  // Load the 3 most recently issued letters for this office
+  const loadRecentIssuedLetters = async () => {
+    if (!office?.id) return;
+    try {
+      const lettersList = await getLetters(office.id);
+      const issued = lettersList
+        .filter(l => l.status === 'issued')
+        .sort((a, b) => {
+          const serialA = parseInt(a.serial_no || '0', 10);
+          const serialB = parseInt(b.serial_no || '0', 10);
+          if (serialA !== serialB) {
+            return serialB - serialA;
+          }
+          return (b.updated_at || b.issue_date || '').localeCompare(a.updated_at || a.issue_date || '');
+        });
+      setRecentIssuedLetters(issued.slice(0, 3));
+    } catch (err) {
+      console.error("Error loading recent issued letters:", err);
+    }
+  };
+
+  // Open Issue Confirmation Modal with calculated values
+  const handleIssueClick = async () => {
+    setErrorText('');
+    
+    // Dynamic Validation Check
+    if (!selectedFileId) {
+      setErrorText('অনুগ্রহ করে চিঠির নথি (File) নির্বাচন করুন।');
+      return;
+    }
+
+    if (letterType === 'standard' && !selectedRecipientId) {
+      setErrorText('সাধারণ পত্রের ক্ষেত্রে প্রাপক নির্বাচন করা আবশ্যক।');
+      return;
+    }
+
+    if (letterType !== 'office_order' && !subject.trim()) {
+      setErrorText('চিঠির বিষয় (Subject) লিখুন।');
+      return;
+    }
+
+    if (!body || body.trim() === '' || body === '<p><br></p>') {
+      setErrorText('চিঠির মূল বিবরণ (Body) খালি রাখা যাবে না।');
+      return;
+    }
+
+    // Load recent 3 issued letters
+    await loadRecentIssuedLetters();
+
+    // Compute next sequence/serial number for this specific file
+    try {
+      const fileObj = files.find(f => f.id === selectedFileId);
+      if (fileObj) {
+        const classObj = classifications.find(c => c.id === (selectedClassificationId || fileObj.subject_classification_id));
+        const res = await generateNextMemoNumber({
+          office: office!,
+          classification: classObj,
+          file: fileObj
+        });
+        setModalSerialNo(res.serial_no);
+      } else {
+        setModalSerialNo('01');
+      }
+    } catch (err) {
+      console.error("Error computing next serial number:", err);
+      setModalSerialNo('01');
+    }
+
+    // Set other states for the modal
+    setModalIssueDate(issueDate || new Date().toISOString().split('T')[0]);
+    setIssueConfirmModalOpen(true);
+  };
+
+  // Confirm letter issue from modal
+  const handleConfirmIssue = async () => {
+    if (!modalSerialNo.trim()) {
+      alert('অনুগ্রহ করে ক্রমিক নম্বর লিখুন।');
+      return;
+    }
+
+    const finalSerial = padLeft(modalSerialNo.trim(), 4);
+    const finalMemo = getMemoWithSerial(memoNo, finalSerial);
+
+    try {
+      await onSave({
+        id: letter?.id,
+        office_id: office?.id || '',
+        file_id: selectedFileId,
+        subject_classification_id: selectedClassificationId || undefined,
+        recipient_id: selectedRecipientId || undefined,
+        sender_user_id: profile?.id || '',
+        signatory_officer_id: selectedSignatoryId || undefined,
+        subject: subject,
+        body: body,
+        letter_type: letterType,
+        memo_no: finalMemo,
+        serial_no: finalSerial,
+        issue_date: modalIssueDate,
+        status: 'issued',
+        notes: notes,
+        created_by: user?.uid || '',
+        copy_recipients: copyRecipients,
+        attachments: attachments,
+        recipient_display_options: {
+          show_name: showName,
+          show_designation: showDesignation,
+          show_organization: showOrganization,
+          show_address: showAddress
+        }
+      }, true);
+      setIssueConfirmModalOpen(false);
+    } catch (err) {
+      console.error("Error confirming issue:", err);
+      setErrorText('চিঠি জারি করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
+    }
+  };
+
+  // Submission Validation & Save as Draft
   const handleSubmit = async (issueNow: boolean) => {
     setErrorText('');
     
@@ -438,26 +722,25 @@ export default function LetterFormView({
       return;
     }
 
-    if (!memoNo) {
-      setErrorText('স্মারক নম্বর জেনারেট করা সম্ভব হয়নি। ফাইল ঠিক করুন।');
-      return;
-    }
+    // Ensure we are saving as draft: empty serial, ends with -xx
+    const finalMemoNo = memoNo.endsWith('-xx') ? memoNo : (memoNo.includes('-') ? (memoNo.substring(0, memoNo.lastIndexOf('-')) + '-xx') : memoNo);
 
     try {
       await onSave({
         id: letter?.id,
         office_id: office?.id || '',
         file_id: selectedFileId,
+        subject_classification_id: selectedClassificationId || undefined,
         recipient_id: selectedRecipientId || undefined,
         sender_user_id: profile?.id || '',
         signatory_officer_id: selectedSignatoryId || undefined,
         subject: subject,
         body: body,
         letter_type: letterType,
-        memo_no: memoNo,
-        serial_no: serialNo,
+        memo_no: finalMemoNo,
+        serial_no: '',
         issue_date: issueDate,
-        status: issueNow ? 'issued' : 'draft',
+        status: 'draft',
         notes: notes,
         created_by: user?.uid || '',
         copy_recipients: copyRecipients,
@@ -468,7 +751,7 @@ export default function LetterFormView({
           show_organization: showOrganization,
           show_address: showAddress
         }
-      }, issueNow);
+      }, false);
     } catch (err) {
       console.error(err);
       setErrorText('চিঠি সংরক্ষণ করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
@@ -517,7 +800,7 @@ export default function LetterFormView({
           </button>
           <button
             type="button"
-            onClick={() => handleSubmit(true)}
+            onClick={handleIssueClick}
             className="px-4 py-2 bg-[#006A4E] hover:bg-opacity-90 text-white rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer shadow-xs"
           >
             <CheckCircle2 size={16} />
@@ -581,162 +864,122 @@ export default function LetterFormView({
           </div>
 
           {/* Attachments Section (সংযুক্তি) */}
-          <div className="pt-4 border-t border-gray-100">
-            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+          <div className="pt-4 border-t border-gray-100 space-y-3">
+            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
               <Paperclip size={16} className="text-[#006A4E]" />
-              <span>সংযুক্তি যোগ করুন (Attachments / Enclosures)</span>
+              <span>সংযুক্তি যোগ করুন (Attachments / Enclosures) (ডাটাবেইজ এ সংরক্ষণের প্রয়োজন নেই)</span>
             </h3>
-            
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={newAttachment}
-                onChange={(e) => setNewAttachment(e.target.value)}
-                placeholder="সংযুক্তির বিবরণ (উদা: প্রশিক্ষণ নির্দেশিকা - ০২ ফর্দ)"
-                className="flex-1 p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addAttachment();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={addAttachment}
-                className="px-3 py-1.5 bg-[#006A4E]/10 text-[#006A4E] hover:bg-[#006A4E]/16 hover:bg-opacity-80 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
-              >
-                <Plus size={14} />
-                যুক্ত করুন
-              </button>
-            </div>
 
-            {attachments.length > 0 && (
-              <div className="space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                {attachments.map((attach, idx) => (
-                  <div key={idx} className="flex justify-between items-center bg-white p-2 border border-gray-150 rounded text-xs">
-                    <span>
-                      <strong className="font-mono text-gray-400 mr-2">{countToBangla(idx + 1)}.</strong>
-                      {attach}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(idx)}
-                      className="text-red-500 hover:text-red-700 transition"
-                      title="মুছুন"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+            {attachments.length === 0 ? (
+              <div className="border border-dashed border-gray-300 rounded-lg p-5 text-center bg-gray-50/50">
+                <p className="text-xs text-gray-500">কোনো সংযুক্তি যোগ করা হয়নি।</p>
+                <button
+                  type="button"
+                  onClick={() => setAttachmentModalOpen(true)}
+                  className="mt-3 text-xs font-bold bg-[#006A4E] text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus size={14} />
+                  সংযুক্তি যোগ করুন (Attachments)
+                </button>
               </div>
-            )}
-          </div>
-
-          {/* Copy Recipients Section (অনুলিপি) */}
-          <div className="pt-4 border-t border-gray-100">
-            <h3 className="text-sm font-bold text-gray-800 mb-3 block">অনুলিপি জ্ঞাতার্থে ও কার্যাদার্থে প্রেরণ (Copy Recipients)</h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-              <input
-                type="text"
-                value={newCopyName}
-                onChange={(e) => setNewCopyName(e.target.value)}
-                placeholder="প্রাপকের নাম বা পদবি"
-                className="p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none"
-              />
-              <input
-                type="text"
-                value={newCopyDesignation}
-                onChange={(e) => setNewCopyDesignation(e.target.value)}
-                placeholder="অতিরিক্ত পদবি বা শাখা (ঐচ্ছিক)"
-                className="p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none"
-              />
-              <input
-                type="text"
-                value={newCopyOrg}
-                onChange={(e) => setNewCopyOrg(e.target.value)}
-                placeholder="অফিস বা প্রতিষ্ঠানের নাম (ঐচ্ছিক)"
-                className="p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none"
-              />
-            </div>
-            
-             <div className="flex gap-2 items-center">
-              <button
-                type="button"
-                onClick={addCopyRecipient}
-                className="px-3 py-1.5 bg-[#006A4E]/10 text-[#006A4E] hover:bg-[#006A4E]/16 hover:bg-opacity-80 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Plus size={14} />
-                অনুলিপি প্রাপক যুক্ত করুন
-              </button>
-            </div>
-
-            {/* Database Presets Suggestions */}
-            {copyPresets && copyPresets.length > 0 && (
-              <div className="mt-3 mb-1">
-                <span className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">পূর্বে ব্যবহৃত অনুলিপি তালিকা (ক্লিক করুন পূরণ করতে):</span>
-                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 bg-gray-50/50 rounded-lg border border-gray-150">
-                  {copyPresets.map(preset => (
-                    <div 
-                      key={preset.id}
-                      className="inline-flex items-center gap-1 text-[11px] bg-white border border-gray-200 text-gray-700 rounded-lg py-0.5 px-2 hover:border-[#006A4E] hover:bg-emerald-50/10 transition group"
-                    >
+            ) : (
+              <div className="bg-emerald-50/10 border border-emerald-100 rounded-lg p-4 space-y-3 relative">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                  <span className="text-xs font-bold text-gray-800 flex items-center gap-1">
+                    <Paperclip size={13} className="text-[#006A4E]" />
+                    সংযুক্তিসমূহ ({countToBangla(attachments.length)}টি)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachmentModalOpen(true)}
+                    className="text-xs font-bold text-[#006A4E] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus size={12} />
+                    আরো সংযুক্তি যোগ করুন
+                  </button>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {attachments.map((attach, idx) => (
+                    <div key={idx} className="flex justify-between items-center bg-white p-2 border border-gray-150 rounded text-xs">
+                      <span>
+                        <strong className="font-mono text-gray-400 mr-2">{countToBangla(idx + 1)}.</strong>
+                        {attach}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => {
-                          setNewCopyName(preset.recipient_name);
-                          setNewCopyDesignation(preset.designation || '');
-                          setNewCopyOrg(preset.organization || '');
-                        }}
-                        className="font-medium text-gray-700 hover:text-[#006A4E] transition text-left cursor-pointer"
-                        title="আগের মত পূরণ করতে ক্লিক করুন"
+                        onClick={() => removeAttachment(idx)}
+                        className="text-red-500 hover:text-red-700 transition cursor-pointer"
+                        title="মুছুন"
                       >
-                        {preset.recipient_name}
-                        {preset.designation && ` (${preset.designation})`}
-                        {preset.organization && ` - ${preset.organization}`}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await deleteCopyPreset(preset.id);
-                          } catch (err) {
-                            console.error("Error deleting copy preset:", err);
-                          }
-                        }}
-                        className="text-gray-300 hover:text-red-500 transition pl-1 ml-1 border-l border-gray-100 cursor-pointer"
-                        title="ডাটাবেসPreset মুছুন"
-                      >
-                        <Trash2 size={10} />
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   ))}
                 </div>
               </div>
             )}
+          </div>
 
-            {/* List copy recipients */}
-            {copyRecipients.length > 0 && (
-              <div className="mt-4 space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                {copyRecipients.map((cr, idx) => (
-                  <div key={cr.id} className="flex justify-between items-center bg-white p-2 border border-gray-150 rounded text-xs">
-                    <span>
-                      <strong className="font-mono text-gray-400 mr-2">{countToBangla(idx + 1)}.</strong>
-                      {cr.recipient_name}
-                      {cr.designation && `, ${cr.designation}`}
-                      {cr.organization && `, ${cr.organization}`}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeCopyRecipient(cr.id)}
-                      className="text-red-500 hover:text-red-700 transition"
-                      title="মুছুন"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+          {/* Copy Recipients Section (অনুলিপি) */}
+          <div className="pt-4 border-t border-gray-100 space-y-3">
+            <h3 className="text-sm font-bold text-gray-800 block">অনুলিপি জ্ঞাতার্থে ও কার্যাদার্থে প্রেরণ (Copy Recipients)</h3>
+
+            {copyRecipients.length === 0 ? (
+              <div className="border border-dashed border-gray-300 rounded-lg p-5 text-center bg-gray-50/50">
+                <p className="text-xs text-gray-500">কোনো অনুলিপি প্রাপক যুক্ত করা হয়নি।</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCopyRecipientSearchQuery('');
+                    setActiveCopyRecipientTab('existing');
+                    setCopyRecipientModalOpen(true);
+                  }}
+                  className="mt-3 text-xs font-bold bg-[#006A4E] text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus size={14} />
+                  অনুলিপি প্রাপক নির্বাচন বা সংযুক্তি
+                </button>
+              </div>
+            ) : (
+              <div className="bg-emerald-50/10 border border-emerald-100 rounded-lg p-4 space-y-3 relative">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                  <span className="text-xs font-bold text-gray-800 flex items-center gap-1">
+                    <User size={13} className="text-[#006A4E]" />
+                    অনুলিপি প্রাপকসমূহ ({countToBangla(copyRecipients.length)} জন)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCopyRecipientSearchQuery('');
+                      setActiveCopyRecipientTab('existing');
+                      setCopyRecipientModalOpen(true);
+                    }}
+                    className="text-xs font-bold text-[#006A4E] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus size={12} />
+                    আরো অনুলিপি প্রাপক যোগ করুন
+                  </button>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {copyRecipients.map((cr, idx) => (
+                    <div key={cr.id} className="flex justify-between items-center bg-white p-2 border border-gray-150 rounded text-xs">
+                      <span>
+                        <strong className="font-mono text-gray-400 mr-2">{countToBangla(idx + 1)}.</strong>
+                        {cr.recipient_name}
+                        {cr.designation && `, ${cr.designation}`}
+                        {cr.organization && `, ${cr.organization}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeCopyRecipient(cr.id)}
+                        className="text-red-500 hover:text-red-700 transition cursor-pointer"
+                        title="মুছুন"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -794,6 +1037,50 @@ export default function LetterFormView({
                 </button>
               )}
               <p className="text-[10px] text-gray-400 mt-1">চিঠিটি যে ক্যাটালগ নথির অধীনে সংরক্ষিত থাকবে।</p>
+            </div>
+
+            {/* Subject Classification selection */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">চিঠির বিষয় ভিত্তিক শ্রেণি বিন্যাস</label>
+              
+              {selectedClassificationId ? (
+                (() => {
+                  const c = classifications.find(x => x.id === selectedClassificationId);
+                  return c ? (
+                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-lg p-3 relative flex flex-col space-y-1">
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs font-bold text-gray-800 flex items-center gap-1">
+                          <Layers size={13} className="text-[#006A4E]" />
+                          {c.title} ({countToBangla(c.code)})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedClassificationId('')}
+                          className="text-gray-400 hover:text-red-500 transition cursor-pointer"
+                          title="নির্বাচন বাতিল করুন"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      {c.description && <span className="text-[11px] text-gray-500">{c.description}</span>}
+                    </div>
+                  ) : null;
+                })()
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClassificationSearchQuery('');
+                    setActiveClassificationTab('existing');
+                    setClassificationModalOpen(true);
+                  }}
+                  className="w-full py-2.5 border border-dashed border-gray-200 hover:border-[#006A4E] text-xs font-semibold text-[#006A4E] hover:bg-emerald-50/20 rounded-lg text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Plus size={14} />
+                  শ্রেণি বিন্যাস নির্বাচন করুন
+                </button>
+              )}
+              <p className="text-[10px] text-gray-400 mt-1">চিঠির জন্য বিষয় ভিত্তিক শ্রেণি বিন্যাস নির্ধারণ করুন (মডালে নতুন শ্রেণি তৈরি করতে পারবেন)।</p>
             </div>
 
             {/* Recipient Link (Standard letter mode mandatory) */}
@@ -1839,6 +2126,815 @@ export default function LetterFormView({
                 </form>
               )}
 
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ATTACHMENTS MODAL */}
+      {attachmentModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-100">
+              <h3 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                <Paperclip size={18} className="text-[#006A4E]" />
+                সংযুক্তি যোগ করুন (Attachments)
+              </h3>
+              <button
+                type="button"
+                onClick={() => setAttachmentModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              
+              {/* Form Input */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-gray-700">নতুন সংযুক্তির নাম/বিবরণ লিখুন (বাংলায়) *</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newAttachment}
+                    onChange={(e) => setNewAttachment(e.target.value)}
+                    placeholder="উদা: প্রশিক্ষণ নির্দেশিকা - ০২ ফর্দ"
+                    className="flex-1 p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addAttachment();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={addAttachment}
+                    className="px-4 py-2 bg-[#006A4E] text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer shrink-0"
+                  >
+                    <Plus size={14} />
+                    যুক্ত করুন
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-500 font-medium"> can be custom text. (ডাটাবেজে সংরক্ষণের প্রয়োজন নেই)।</p>
+              </div>
+
+              {/* Standard presets for quick selection */}
+              <div>
+                <span className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-2">
+                  সহজে যোগ করতে ক্লিক করুন (Quick presets) {historyPresets.length > 0 && " - সর্বাধিক ব্যবহৃত"}:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {(historyPresets.length > 0 
+                    ? [
+                        ...historyPresets,
+                        ...[
+                          "প্রশিক্ষণ নির্দেশিকা - ০১ ফর্দ",
+                          "তদন্ত প্রতিবেদন - ০৪ ফর্দ",
+                          "আবেদনপত্র ও বায়োডাটা - ০২ ফর্দ",
+                          "বাজেট বিবরণী ও অনুমোদন পত্র - ০৩ পৃষ্ঠা",
+                          "নথি অনুলিপি - ০৫ ফর্দ",
+                          "প্রয়োজনীয় কাগজপত্র - ০১ সেট"
+                        ].filter(p => !historyPresets.includes(p))
+                      ].slice(0, 5)
+                    : [
+                        "প্রশিক্ষণ নির্দেশিকা - ০১ ফর্দ",
+                        "তদন্ত প্রতিবেদন - ০৪ ফর্দ",
+                        "আবেদনপত্র ও বায়োডাটা - ০২ ফর্দ",
+                        "বাজেট বিবরণী ও অনুমোদন পত্র - ০৩ পৃষ্ঠা",
+                        "নথি অনুলিপি - ০৫ ফর্দ",
+                        "প্রয়োজনীয় কাগজপত্র - ০১ সেট"
+                      ]
+                  ).map((presetText) => (
+                    <button
+                      key={presetText}
+                      type="button"
+                      onClick={() => {
+                        if (!attachments.includes(presetText)) {
+                          setAttachments([...attachments, presetText]);
+                        }
+                      }}
+                      className="text-left p-2 rounded-lg border border-gray-200 text-[11px] text-gray-700 hover:border-[#006A4E] hover:bg-emerald-50/20 cursor-pointer transition font-medium"
+                    >
+                      + {presetText}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Current List within modal */}
+              {attachments.length > 0 && (
+                <div className="pt-2 border-t border-gray-100">
+                  <span className="block text-[11px] font-bold text-gray-800 mb-2">যুক্তকৃত সংযুক্তিসমূহ:</span>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {attachments.map((attach, idx) => (
+                      <div key={idx} className="flex justify-between items-center bg-gray-50 p-2 border border-gray-150 rounded text-xs">
+                        <span className="text-gray-700">
+                          <strong className="font-mono text-gray-400 mr-1.5">{countToBangla(idx + 1)}.</strong>
+                          {attach}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(idx)}
+                          className="text-red-500 hover:text-red-700 transition cursor-pointer p-0.5"
+                          title="মুছুন"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAttachmentModalOpen(false)}
+                className="px-4 py-2 bg-[#006A4E] text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                সম্পন্ন
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* COPY RECIPIENT SELECTION MODAL */}
+      {copyRecipientModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-100">
+              <h3 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                <UserPlus size={18} className="text-[#006A4E]" />
+                অনুলিপি প্রাপক নির্বাচন ও সংযুক্তি
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCopyRecipientModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Tabs Header */}
+            <div className="flex border-b border-gray-100 bg-gray-50/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveCopyRecipientTab('existing');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeCopyRecipientTab === 'existing'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                বিদ্যমান তালিকা ({copyPresets.length + recipients.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveCopyRecipientTab('new');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeCopyRecipientTab === 'new'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                নতুন অনুলিপি প্রাপক এন্ট্রি
+              </button>
+            </div>
+
+            {/* Modal Content Space */}
+            <div className="p-4 overflow-y-auto flex-1">
+              
+              {/* TAB 1: EXISTING LIST */}
+              {activeCopyRecipientTab === 'existing' && (
+                <div className="space-y-4">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      value={copyRecipientSearchQuery}
+                      onChange={(e) => setCopyRecipientSearchQuery(e.target.value)}
+                      placeholder="নাম, পদবি বা প্রতিষ্ঠানের নাম দিয়ে খুঁজুন..."
+                      className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  {/* List items */}
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {(() => {
+                      // 1. Get filtered presets
+                      const filteredPresets = copyPresets.filter(p => 
+                        p.recipient_name.toLowerCase().includes(copyRecipientSearchQuery.toLowerCase()) ||
+                        (p.designation || '').toLowerCase().includes(copyRecipientSearchQuery.toLowerCase()) ||
+                        (p.organization || '').toLowerCase().includes(copyRecipientSearchQuery.toLowerCase())
+                      );
+
+                      // 2. Get filtered general recipients
+                      const filteredRecs = recipients.filter(r => 
+                        r.recipient_name.toLowerCase().includes(copyRecipientSearchQuery.toLowerCase()) ||
+                        (r.designation || '').toLowerCase().includes(copyRecipientSearchQuery.toLowerCase()) ||
+                        (r.organization || '').toLowerCase().includes(copyRecipientSearchQuery.toLowerCase())
+                      );
+
+                      if (filteredPresets.length === 0 && filteredRecs.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-gray-500">
+                            <p className="text-xs">কোনো অনুলিপি প্রাপক পাওয়া যায়নি।</p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-3">
+                          {filteredPresets.length > 0 && (
+                            <div className="space-y-1.5">
+                              <span className="block text-[10px] font-bold text-gray-400 uppercase">পূর্বে ব্যবহৃত অনুলিপিসমূহ (Presets)</span>
+                              {filteredPresets.map(preset => {
+                                const alreadyAdded = copyRecipients.some(
+                                  cr => cr.recipient_name.toLowerCase() === preset.recipient_name.toLowerCase()
+                                );
+                                return (
+                                  <div 
+                                    key={preset.id}
+                                    className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 bg-white hover:border-[#006A4E] hover:bg-emerald-50/10 transition text-xs"
+                                  >
+                                    <div className="text-left">
+                                      <p className="font-bold text-gray-800">{preset.recipient_name}</p>
+                                      <p className="text-gray-500 text-[11px]">
+                                        {preset.designation && preset.designation}
+                                        {preset.designation && preset.organization && ' - '}
+                                        {preset.organization && preset.organization}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          try {
+                                            await deleteCopyPreset(preset.id);
+                                          } catch (err) {
+                                            console.error("Error deleting copy preset:", err);
+                                          }
+                                        }}
+                                        className="text-gray-300 hover:text-red-500 transition p-1 hover:bg-gray-100 rounded cursor-pointer"
+                                        title="মুছুন"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={alreadyAdded}
+                                        onClick={() => {
+                                          const newCopy: CopyRecipient = {
+                                            id: 'cr_' + Date.now(),
+                                            recipient_name: preset.recipient_name,
+                                            designation: preset.designation || undefined,
+                                            organization: preset.organization || undefined,
+                                          };
+                                          setCopyRecipients([...copyRecipients, newCopy]);
+                                        }}
+                                        className={`px-2 py-1 rounded text-[11px] font-bold transition cursor-pointer ${
+                                          alreadyAdded 
+                                            ? 'bg-gray-100 text-gray-400' 
+                                            : 'bg-emerald-50 text-[#006A4E] hover:bg-[#006A4E] hover:text-white'
+                                        }`}
+                                      >
+                                        {alreadyAdded ? 'যুক্ত আছে' : 'যোগ করুন'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {filteredRecs.length > 0 && (
+                            <div className="space-y-1.5">
+                              <span className="block text-[10px] font-bold text-gray-400 uppercase">বিদ্যমান মূল প্রাপক তালিকা (Recipients)</span>
+                              {filteredRecs.map(rec => {
+                                const alreadyAdded = copyRecipients.some(
+                                  cr => cr.recipient_name.toLowerCase() === rec.recipient_name.toLowerCase()
+                                );
+                                return (
+                                  <div 
+                                    key={rec.id}
+                                    className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 bg-white hover:border-[#006A4E] hover:bg-emerald-50/10 transition text-xs"
+                                  >
+                                    <div className="text-left">
+                                      <p className="font-bold text-gray-800">{rec.recipient_name}</p>
+                                      <p className="text-gray-500 text-[11px]">
+                                        {rec.designation && rec.designation}
+                                        {rec.designation && rec.organization && ' - '}
+                                        {rec.organization && rec.organization}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      disabled={alreadyAdded}
+                                      onClick={() => {
+                                        const newCopy: CopyRecipient = {
+                                          id: 'cr_' + Date.now(),
+                                          recipient_name: rec.recipient_name,
+                                          designation: rec.designation || undefined,
+                                          organization: rec.organization || undefined,
+                                        };
+                                        setCopyRecipients([...copyRecipients, newCopy]);
+                                      }}
+                                      className={`px-2 py-1 rounded text-[11px] font-bold transition cursor-pointer ${
+                                        alreadyAdded 
+                                          ? 'bg-gray-100 text-gray-400' 
+                                          : 'bg-emerald-50 text-[#006A4E] hover:bg-[#006A4E] hover:text-white'
+                                      }`}
+                                    >
+                                      {alreadyAdded ? 'যুক্ত আছে' : 'যোগ করুন'}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: CREATE NEW COPY RECIPIENT */}
+              {activeCopyRecipientTab === 'new' && (
+                <form 
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    await addCopyRecipient();
+                    setActiveCopyRecipientTab('existing');
+                  }} 
+                  className="space-y-3 pb-2"
+                >
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">অনুলিপি প্রাপকের নাম বা পদবি (বাংলায়) *</label>
+                    <input
+                      type="text"
+                      value={newCopyName}
+                      onChange={(e) => setNewCopyName(e.target.value)}
+                      placeholder="উদা: সচিব, তথ্য ও যোগাযোগ প্রযুক্তি বিভাগ"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">শাখা বা বিশেষ পরিচিতি (ঐচ্ছিক)</label>
+                    <input
+                      type="text"
+                      value={newCopyDesignation}
+                      onChange={(e) => setNewCopyDesignation(e.target.value)}
+                      placeholder="উদা: প্রশাসন শাখা / মেমো সেল"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">অফিস বা প্রতিষ্ঠানের নাম (ঐচ্ছিক)</label>
+                    <input
+                      type="text"
+                      value={newCopyOrg}
+                      onChange={(e) => setNewCopyOrg(e.target.value)}
+                      placeholder="উদা: ডাক ও টেলিযোগাযোগ মন্ত্রণালয়"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  <div className="pt-3 flex justify-end gap-2 border-t border-gray-100 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveCopyRecipientTab('existing');
+                      }}
+                      className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      বাতিল
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-[#006A4E] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold transition cursor-pointer"
+                    >
+                      সংরক্ষণ ও যোগ করুন
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Added copy recipients list summary */}
+              {copyRecipients.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-100">
+                  <span className="block text-[11px] font-bold text-gray-800 mb-2">যুক্তকৃত অনুলিপি প্রাপকসমূহ ({copyRecipients.length} জন):</span>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                    {copyRecipients.map((cr, idx) => (
+                      <div key={cr.id} className="flex justify-between items-center bg-gray-50 p-2 border border-gray-150 rounded text-xs">
+                        <span className="text-gray-700">
+                          <strong className="font-mono text-gray-400 mr-1.5">{countToBangla(idx + 1)}.</strong>
+                          {cr.recipient_name}
+                          {cr.designation && `, ${cr.designation}`}
+                          {cr.organization && `, ${cr.organization}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeCopyRecipient(cr.id)}
+                          className="text-red-500 hover:text-red-700 transition cursor-pointer p-0.5"
+                          title="মুছুন"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setCopyRecipientModalOpen(false)}
+                className="px-4 py-2 bg-[#006A4E] text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                সম্পন্ন
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* SUBJECT CLASSIFICATION SELECTION MODAL */}
+      {classificationModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-100">
+              <h3 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                <Layers size={18} className="text-[#006A4E]" />
+                বিষয় ভিত্তিক শ্রেণি বিন্যাস নির্বাচন ও সংযুক্তি
+              </h3>
+              <button
+                type="button"
+                onClick={() => setClassificationModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Tabs Header */}
+            <div className="flex border-b border-gray-100 bg-gray-50/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveClassificationTab('existing');
+                  setClassificationModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeClassificationTab === 'existing'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                বিদ্যমান শ্রেণি তালিকা ({classifications.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveClassificationTab('new');
+                  setClassificationModalError('');
+                }}
+                className={`flex-1 py-2.5 text-xs font-bold transition text-center ${
+                  activeClassificationTab === 'new'
+                    ? 'border-b-2 border-[#006A4E] text-[#006A4E] bg-white bg-opacity-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                নতুন শ্রেণি বিন্যাস সংযুক্তি
+              </button>
+            </div>
+
+            {/* Modal Content Space */}
+            <div className="p-4 overflow-y-auto flex-1">
+              
+              {classificationModalError && (
+                <div className="mb-3 p-2.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium">
+                  {classificationModalError}
+                </div>
+              )}
+
+              {/* TAB 1: EXISTING LIST */}
+              {activeClassificationTab === 'existing' && (
+                <div className="space-y-4">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 text-gray-400" size={16} />
+                    <input
+                      type="text"
+                      value={classificationSearchQuery}
+                      onChange={(e) => setClassificationSearchQuery(e.target.value)}
+                      placeholder="শ্রেণির নাম বা কোড দিয়ে খুঁজুন..."
+                      className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
+                  {/* List of Classifications */}
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {(() => {
+                      const filtered = classifications.filter(c => 
+                        (c.title || '').toLowerCase().includes(classificationSearchQuery.toLowerCase()) ||
+                        (c.code || '').toLowerCase().includes(classificationSearchQuery.toLowerCase())
+                      );
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-gray-500">
+                            <p className="text-xs">কোনো শ্রেণি বিন্যাস পাওয়া যায়নি।</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveClassificationTab('new');
+                                setClassificationSearchQuery('');
+                              }}
+                              className="mt-2 text-xs text-[#006A4E] font-bold hover:underline cursor-pointer"
+                            >
+                              নতুন শ্রেণি বিন্যাস এন্ট্রি করুন →
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return filtered.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedClassificationId(c.id);
+                            setClassificationModalOpen(false);
+                          }}
+                          className={`w-full text-left p-3 rounded-lg border transition flex flex-col text-xs space-y-1 hover:border-[#006A4E] hover:bg-emerald-50/20 cursor-pointer ${
+                            selectedClassificationId === c.id
+                              ? 'border-[#006A4E] bg-emerald-50/30 font-semibold'
+                              : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center w-full">
+                            <span className="font-bold text-gray-800 flex items-center gap-1">
+                              <Layers size={12} className="text-[#006A4E]" />
+                              {c.title}
+                            </span>
+                            {selectedClassificationId === c.id && (
+                              <span className="text-[10px] text-white bg-[#006A4E] px-1.5 py-0.5 rounded font-bold">selected</span>
+                            )}
+                          </div>
+                          <div className="flex justify-between text-gray-500 font-medium text-[11px] pt-1">
+                            <span>শ্রেণি কোড: {countToBangla(c.code)}</span>
+                            {c.description && <span className="line-clamp-1 max-w-[200px]">{c.description}</span>}
+                          </div>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: CREATE NEW FORM */}
+              {activeClassificationTab === 'new' && (
+                <form onSubmit={handleAddNewClassification} className="space-y-3 pb-2">
+                  
+                  {/* Code */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">শ্রেণি কোড (Subject Code) *</label>
+                    <input
+                      type="text"
+                      value={newClassificationCode}
+                      onChange={(e) => setNewClassificationCode(e.target.value)}
+                      placeholder="যেমন: ১৫"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  {/* Title */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">শ্রেণির নাম (Subject Name) *</label>
+                    <input
+                      type="text"
+                      value={newClassificationTitle}
+                      onChange={(e) => setNewClassificationTitle(e.target.value)}
+                      placeholder="যেমন: সভা, অর্থ, সাধারণ"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                      required
+                    />
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">অতিরিক্ত বিবরণ/টিকা (Description)</label>
+                    <textarea
+                      value={newClassificationDesc}
+                      onChange={(e) => setNewClassificationDesc(e.target.value)}
+                      placeholder="শ্রেণি বিন্যাসের বিবরণ"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none font-sans"
+                      rows={2}
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-3 flex justify-end gap-2 border-t border-gray-100 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewClassificationCode('');
+                        setNewClassificationTitle('');
+                        setNewClassificationDesc('');
+                        setClassificationModalError('');
+                        setClassificationModalOpen(false);
+                      }}
+                      className="px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      বাতিল
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={classificationSubmitting}
+                      className="px-4 py-1.5 bg-[#006A4E] text-white hover:bg-opacity-90 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      {classificationSubmitting ? 'সংরক্ষণ হচ্ছে...' : 'সংরক্ষণ করুন'}
+                    </button>
+                  </div>
+
+                </form>
+              )}
+
+            </div>
+
+            {/* Modal Footer (only show for selection list view) */}
+            {activeClassificationTab === 'existing' && (
+              <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setClassificationModalOpen(false)}
+                  className="px-4 py-2 bg-[#006A4E] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs"
+                >
+                  সম্পন্ন
+                </button>
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+
+      {/* LETTER ISSUE CONFIRMATION MODAL */}
+      {issueConfirmModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-xl rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[90vh]">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-[#006A4E]/5">
+              <h3 className="text-md font-bold text-gray-800 flex items-center gap-2">
+                <CheckCircle2 size={18} className="text-[#006A4E]" />
+                সরকারি চিঠি জারিকরণ নিশ্চিত করুন (Issue Letter)
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIssueConfirmModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-5 text-xs">
+              
+              {/* Alert / Warning */}
+              <div className="p-3 bg-amber-50 border border-amber-100 text-amber-850 rounded-lg font-medium leading-relaxed">
+                <strong>সতর্কতা:</strong> চিঠি জারি করার পর স্মারক নম্বর স্থায়ীভাবে নিবন্ধিত হবে এবং চিঠির বিবরণ আর কোনোভাবেই সংশোধন করা সম্ভব হবে না।
+              </div>
+
+              {/* Last 3 Issued Letters List */}
+              <div className="space-y-2">
+                <span className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                  সর্বশেষ জারিকৃত ৩টি চিঠি (স্মরণিকা):
+                </span>
+                {recentIssuedLetters.length === 0 ? (
+                  <p className="text-gray-500 italic p-3 bg-gray-50 border border-gray-150 rounded-lg text-center">
+                    পূর্বে কোনো চিঠি জারি করা হয়নি।
+                  </p>
+                ) : (
+                  <div className="divide-y divide-gray-100 border border-gray-150 rounded-lg bg-gray-50/50 overflow-hidden">
+                    {recentIssuedLetters.map((l, idx) => (
+                      <div key={l.id || idx} className="p-3 text-left flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                        <div className="space-y-0.5">
+                          <p className="font-bold text-gray-800 line-clamp-1">
+                            {idx + 1}. বিষয়: {l.subject || '[শিরোনামহীন]'}
+                          </p>
+                          <p className="text-gray-500 font-mono text-[11px]">
+                            স্মারক নং: {countToBangla(l.memo_no)}
+                          </p>
+                        </div>
+                        <div className="shrink-0 bg-[#006A4E]/10 text-[#006A4E] px-2 py-0.5 rounded-full font-bold text-[10px]">
+                          তারিখ: {countToBangla(l.issue_date)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Form Input fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-gray-100">
+                
+                {/* Serial Number Input */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-gray-700">
+                    ক্রমিক নম্বর (Serial No) *
+                  </label>
+                  <input
+                    type="text"
+                    value={modalSerialNo}
+                    onChange={(e) => setModalSerialNo(e.target.value)}
+                    placeholder="উদা: 01 বা 1"
+                    className="w-full p-2.5 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E] font-bold"
+                  />
+                  <p className="text-[10px] text-gray-500 leading-normal">
+                    সর্বশেষ জারিকৃত চিঠির ক্রমানুসারে পরবর্তী ক্রমিক। আপনি চাইলে এটি ম্যানুয়ালি পরিবর্তন করতে পারেন।
+                  </p>
+                </div>
+
+                {/* Issue Date Input */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-gray-700">
+                    জারির তারিখ (Issue Date) *
+                  </label>
+                  <input
+                    type="date"
+                    value={modalIssueDate}
+                    onChange={(e) => setModalIssueDate(e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E] font-bold"
+                  />
+                  <p className="text-[10px] text-gray-500 leading-normal">
+                    চিঠিটি জারির তারিখ নির্বাচন করুন। ডিফল্টরূপে আজকের তারিখ দেওয়া রয়েছে।
+                  </p>
+                </div>
+
+              </div>
+
+              {/* Live Preview of Memo Number with the input Serial */}
+              <div className="p-3 bg-emerald-50/40 border border-emerald-100 rounded-lg space-y-1">
+                <span className="block text-[10px] font-bold text-[#006A4E] uppercase tracking-wider">
+                  নির্ধারিত চূড়ান্ত স্মারক নম্বর প্রিভিউ:
+                </span>
+                <p className="font-mono text-xs font-bold text-gray-800 break-all select-all">
+                  {countToBangla(getMemoWithSerial(memoNo, modalSerialNo || '01'))}
+                </p>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIssueConfirmModalOpen(false)}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-xs font-semibold cursor-pointer transition"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmIssue}
+                className="px-5 py-2 bg-[#006A4E] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition"
+              >
+                <CheckCircle2 size={14} />
+                নিশ্চিত করুন ও জারি করুন
+              </button>
             </div>
 
           </div>

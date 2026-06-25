@@ -182,35 +182,39 @@ export default function PrintLetter({ letter, profile, office, recipient, office
 
         {/* Signatory on the Right Column */}
         <div className="text-right text-sm leading-snug text-black">
-          {selectedOfficer ? (
-            <>
-              <p className="font-bold text-black">{selectedOfficer.name}</p>
-              <p className="text-xs text-black font-semibold">{selectedOfficer.designation}</p>
-              <p className="text-xs text-black">{office?.office_name || 'দপ্তর'}</p>
-              
-              {selectedOfficer.phone ? (
-                <p className="text-xs text-black">মোবাইল: {countToBangla(selectedOfficer.phone)}</p>
-              ) : office?.phone ? (
-                <p className="text-xs text-black">ফোন: {countToBangla(office.phone)}</p>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <p className="font-bold text-black">{profile?.name || 'কর্মকর্তার নাম'}</p>
-              <p className="text-xs text-black font-semibold">{profile?.designation || 'পদবি'}</p>
-              <p className="text-xs text-black">{office?.office_name || 'দপ্তর'}</p>
-              
-              {office?.phone && <p className="text-xs text-black">ফোন: {countToBangla(office.phone)}</p>}
-            </>
-          )}
+          <div className="inline-block text-center">
+            {selectedOfficer ? (
+              <>
+                <p className="font-bold text-black">{selectedOfficer.name}</p>
+                <p className="text-xs text-black font-semibold">{selectedOfficer.designation}</p>
+                {orgNameLine3 && <p className="text-xs text-black">{orgNameLine3}</p>}
+                <p className="text-xs text-black">{orgAddressLine4}</p>
+                
+                {selectedOfficer.phone ? (
+                  <p className="text-xs text-black">মোবাইল: {countToBangla(selectedOfficer.phone)}</p>
+                ) : office?.phone ? (
+                  <p className="text-xs text-black">ফোন: {countToBangla(office.phone)}</p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <p className="font-bold text-black">{profile?.name || 'কর্মকর্তার নাম'}</p>
+                <p className="text-xs text-black font-semibold">{profile?.designation || 'পদবি'}</p>
+                {orgNameLine3 && <p className="text-xs text-black">{orgNameLine3}</p>}
+                <p className="text-xs text-black">{orgAddressLine4}</p>
+                
+                {office?.phone && <p className="text-xs text-black">ফোন: {countToBangla(office.phone)}</p>}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* 7.5 ATTACHMENTS SECTION (If any exist) */}
       {letter.attachments && letter.attachments.length > 0 && (
-        <div className="mb-4 text-xs text-black leading-relaxed select-none" id="attachments-print-block">
-          <p className="font-bold underline mb-1 text-black">সংযুক্তি:</p>
-          <div className="space-y-0.5 text-black pl-2">
+        <div className="text-xs text-black leading-relaxed select-none" id="attachments-print-block">
+          <p className="font-bold underline text-black">সংযুক্তি:</p>
+          <div className="text-black">
             {letter.attachments.map((attach, idx) => (
               <div key={idx} className="flex items-start text-black">
                 <span className="w-4 shrink-0 text-left font-semibold">{countToBangla(idx + 1)}.</span>
@@ -224,8 +228,8 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       {/* 8. COPY RECIPIENTS SECTION (If any exist) */}
       {letter.copy_recipients && letter.copy_recipients.length > 0 && (
         <div className="text-xs text-black leading-relaxed select-none" id="copy-rec-print-block">
-          <p className="font-bold underline mb-1 text-black">অনুলিপি জ্ঞাতার্থে ও কার্যার্থে প্রেরিত হলো:</p>
-          <div className="space-y-0.5 text-black pl-2">
+          <p className="font-bold underline text-black">অনুলিপি জ্ঞাতার্থে ও কার্যার্থে প্রেরিত হলো:</p>
+          <div className="text-black">
             {letter.copy_recipients.map((cr, idx) => (
               <div key={cr.id || idx} className="flex items-start text-black">
                 <span className="w-4 shrink-0 text-left font-semibold">{countToBangla(idx + 1)}.</span>
@@ -245,17 +249,13 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       )}
 
       {/* 9. QR CODE SECTION */}
-      <div className="mt-8 flex justify-start items-center select-none gap-3" id="qr-code-print-block">
+      <div className="mt-8 flex justify-start select-none" id="qr-code-print-block">
         <QRCodeSVG
           value={qrData}
           size={60}
           level="M"
           includeMargin={false}
         />
-        <div className="text-[9px] text-gray-500 font-sans leading-tight">
-          <p className="font-semibold text-black">ডিজিটাল যাচাইকরণ কিউআর কোড</p>
-          <p className="text-gray-400">স্মারক নং ও তারিখ যাচাইয়ের জন্য স্ক্যান করুন</p>
-        </div>
       </div>
     </div>
   );

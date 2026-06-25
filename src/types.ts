@@ -106,6 +106,7 @@ export interface Letter {
   id: string;
   office_id: string;
   file_id: string; // Link to File
+  subject_classification_id?: string; // Link to Subject Classification
   recipient_id?: string; // Link to Recipient (optional for office order, notice)
   sender_user_id: string; // Link to User
   signatory_officer_id?: string; // Link to selective Officer/Signatory

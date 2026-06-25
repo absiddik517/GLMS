@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Save, CheckCircle2, FileText, Stamp } from 'lucide-react';
 import { UserProfile } from '../types';
 
@@ -15,13 +15,25 @@ export default function ProfileSettingsView({
   // Form states
   const [name, setName] = useState(profile?.name || '');
   const [designation, setDesignation] = useState(profile?.designation || '');
-  const [email] = useState(profile?.email || '');
+  const [email, setEmail] = useState(profile?.email || '');
   const [mobile, setMobile] = useState(profile?.mobile || '');
   const [sigImage, setSigImage] = useState(profile?.signature_image || '');
   const [sealImage, setSealImage] = useState(profile?.seal_image || '');
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Sync state when profile prop loads or updates
+  useEffect(() => {
+    if (profile) {
+      setName(profile.name || '');
+      setDesignation(profile.designation || '');
+      setEmail(profile.email || '');
+      setMobile(profile.mobile || '');
+      setSigImage(profile.signature_image || '');
+      setSealImage(profile.seal_image || '');
+    }
+  }, [profile]);
 
   // Signature file changes handler -> Converts to compact Base64
   const handleSignatureFile = (e: React.ChangeEvent<HTMLInputElement>) => {

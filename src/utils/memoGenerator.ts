@@ -44,16 +44,18 @@ export async function generateNextMemoNumber(params: MemoParams): Promise<{
   const snapshot = await getDocs(q);
   
   if (!snapshot.empty) {
-    const docs = snapshot.docs.map(d => d.data());
-    docs.sort((a, b) => {
-      const serialA = parseInt(a.serial_no || '0', 10);
-      const serialB = parseInt(b.serial_no || '0', 10);
-      return serialB - serialA;
-    });
-    const latestLetter = docs[0];
-    const latestSerial = parseInt(latestLetter.serial_no || '0', 10);
-    if (!isNaN(latestSerial)) {
-      nextIncrement = latestSerial + 1;
+    const docs = snapshot.docs.map(d => d.data()).filter(d => d.status === 'issued' && d.serial_no);
+    if (docs.length > 0) {
+      docs.sort((a, b) => {
+        const serialA = parseInt(a.serial_no || '0', 10);
+        const serialB = parseInt(b.serial_no || '0', 10);
+        return serialB - serialA;
+      });
+      const latestLetter = docs[0];
+      const latestSerial = parseInt(latestLetter.serial_no || '0', 10);
+      if (!isNaN(latestSerial)) {
+        nextIncrement = latestSerial + 1;
+      }
     }
   }
   
@@ -73,10 +75,10 @@ export async function generateNextMemoNumber(params: MemoParams): Promise<{
   }
   openingYear = padLeft(openingYear, 2);
   
-  const serialNoStr = padLeft(nextIncrement, 4);
+  const serialNoStr = padLeft(nextIncrement, 2);
   
   // Memo combination
-  const memoNo = `${ministry}.${officeCode}.${geoCode}.${instCode}.${branchCode}.${classCode}.${fileCode}.${openingYear}.${serialNoStr}`;
+  const memoNo = `${ministry}.${officeCode}.${geoCode}.${instCode}.${branchCode}.${classCode}.${fileCode}.${openingYear}-${serialNoStr}`;
   
   return {
     memo_no: memoNo,
