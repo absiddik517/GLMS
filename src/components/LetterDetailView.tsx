@@ -12,7 +12,9 @@ import {
   FileCheck,
   CheckCircle,
   HelpCircle,
-  ShieldAlert
+  ShieldAlert,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { Letter, UserProfile, Office, NothiFile, Recipient, Officer } from '../types';
 import PrintLetter from './PrintLetter';
@@ -50,6 +52,7 @@ export default function LetterDetailView({
   
   const printAreaRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   // Directly generate and download the PDF
   const handleDownloadPDF = async () => {
@@ -366,6 +369,15 @@ export default function LetterDetailView({
             {isDownloading ? 'পিডিএফ তৈরি হচ্ছে...' : 'পিডিএফ ডাউনলোড'}
           </button>
 
+          {/* Full Screen option */}
+          <button
+            onClick={() => setIsFullScreen(true)}
+            className="bg-white hover:bg-gray-50 text-gray-800 border border-gray-200 px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+          >
+            <Maximize2 size={14} />
+            ফুল স্ক্রিন
+          </button>
+
           {/* Conditional Controls */}
           {letter.status === 'draft' ? (
             <>
@@ -405,48 +417,116 @@ export default function LetterDetailView({
       </div>
 
       {/* METADATA GENERAL DETAILS */}
-      <div className="bg-white p-5 rounded-lg border border-gray-100 shadow-xs grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-sans">
-        <div>
-          <span className="block text-gray-400 font-semibold uppercase mb-0.5">স্মারক নম্বর:</span>
-          <span className="font-mono text-gray-800 font-bold select-all leading-relaxed">
+      <div className="bg-white p-5 rounded-lg border border-gray-100 shadow-xs space-y-4 text-xs font-sans">
+        <div className="border-b border-gray-50 pb-3">
+          <span className="block text-gray-400 font-semibold uppercase mb-1">স্মারক নম্বর:</span>
+          <span className="font-mono text-gray-800 text-sm font-bold select-all leading-relaxed">
             {countToBangla(letter.memo_no) || <span className="text-gray-400 font-normal italic">খসড়া পর্যায়</span>}
           </span>
         </div>
-        <div>
-          <span className="block text-gray-400 font-semibold uppercase mb-0.5">মডিউল ও প্রকার:</span>
-          <span className="text-gray-800 font-bold">
-            {letter.letter_type === 'standard' ? 'সাধারণ পত্র' : 
-             letter.letter_type === 'office_order' ? 'অফিস আদেশ' : 'নোটিশ/পত্র'}
-          </span>
-        </div>
-        <div>
-          <span className="block text-gray-400 font-semibold uppercase mb-0.5">সংশ্লিষ্ট নথি ফাইল:</span>
-          <span className="text-gray-800 font-bold truncate block" title={getFileName()}>
+        
+        <div className="border-b border-gray-50 pb-3">
+          <span className="block text-gray-400 font-semibold uppercase mb-1">সংশ্লিষ্ট নথি ফাইল:</span>
+          <span className="text-gray-800 text-sm font-bold truncate block" title={getFileName()}>
             {getFileName()}
           </span>
         </div>
-        <div>
-          <span className="block text-gray-400 font-semibold uppercase mb-0.5">সংরক্ষণের স্থিতি:</span>
-          <span className={`inline-block font-semibold px-2 py-0.5 rounded ${
-            letter.status === 'issued' ? 'bg-emerald-50 text-emerald-700' :
-            letter.status === 'archived' ? 'bg-amber-50 text-amber-700' :
-            'bg-gray-100 text-gray-700'
-          }`}>
-            {letter.status === 'issued' ? 'জারিকৃত (Active)' : letter.status === 'archived' ? 'আর্কাইভকৃত' : 'খসড়া (Draft)'}
-          </span>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <span className="block text-gray-400 font-semibold uppercase mb-1">মডিউল ও প্রকার:</span>
+            <span className="text-gray-800 text-sm font-bold">
+              {letter.letter_type === 'standard' ? 'সাধারণ পত্র' : 
+               letter.letter_type === 'office_order' ? 'অফিস আদেশ' : 'নোটিশ/পত্র'}
+            </span>
+          </div>
+          <div>
+            <span className="block text-gray-400 font-semibold uppercase mb-1">সংরক্ষণের স্থিতি:</span>
+            <span className={`inline-block font-semibold px-2 py-0.5 rounded text-sm ${
+              letter.status === 'issued' ? 'bg-emerald-50 text-emerald-700' :
+              letter.status === 'archived' ? 'bg-amber-50 text-amber-700' :
+              'bg-gray-100 text-gray-700'
+            }`}>
+              {letter.status === 'issued' ? 'জারিকৃত (Active)' : letter.status === 'archived' ? 'আর্কাইভকৃত' : 'খসড়া (Draft)'}
+            </span>
+          </div>
         </div>
       </div>
 
       {/* RENDER DYNAMIC PAPER LETTERHEAD PREVIEW */}
-      <div className="flex justify-center bg-gray-50 border p-6 rounded-xl overflow-x-auto">
-        <PrintLetter 
-          letter={letter}
-          profile={profile}
-          office={office}
-          recipient={recipients.find(r => r.id === letter.recipient_id)}
-          officers={officers}
-        />
+      <div className="flex flex-col gap-3">
+        <div className="flex justify-between items-center px-1">
+          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">লেটারহেড প্রাকদর্শন (A4 সাইজ)</span>
+          <button
+            onClick={() => setIsFullScreen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs transition cursor-pointer"
+          >
+            <Maximize2 size={13} />
+            ফুল স্ক্রিন প্রাকদর্শন
+          </button>
+        </div>
+        <div className="w-full overflow-x-auto bg-gray-50 border border-gray-200 p-4 md:p-6 rounded-xl shadow-inner">
+          <div className="min-w-max flex justify-start lg:justify-center">
+            <div className="relative shadow-lg border border-gray-100 rounded-sm overflow-hidden bg-white" style={{ width: '794px', height: '1123px' }}>
+              <div className="absolute inset-0 overflow-y-auto bg-white" style={{ scrollbarWidth: 'thin' }}>
+                <PrintLetter 
+                  letter={letter}
+                  profile={profile}
+                  office={office}
+                  recipient={recipients.find(r => r.id === letter.recipient_id)}
+                  officers={officers}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* FULL SCREEN MODAL */}
+      {isFullScreen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-4 md:p-8 no-print">
+          {/* Full Screen Header */}
+          <div className="w-full max-w-[840px] flex justify-between items-center text-white mb-4">
+            <div>
+              <h3 className="font-bold text-lg">পত্রের পূর্ণাঙ্গ প্রাকদর্শন (A4 সাইজ)</h3>
+              <p className="text-xs text-gray-300 mt-0.5">{letter.subject || 'সরকারি পত্র'}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handlePrint}
+                className="bg-white text-gray-900 hover:bg-gray-100 px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+              >
+                <Printer size={13} />
+                প্রিন্ট করুন
+              </button>
+              <button
+                onClick={() => setIsFullScreen(false)}
+                className="bg-red-600 hover:bg-red-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+              >
+                <Minimize2 size={13} />
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
+
+          {/* A4 Container in Full Screen */}
+          <div className="w-full max-w-[840px] bg-gray-900/40 p-4 rounded-xl overflow-x-auto shadow-inner mb-6">
+            <div className="min-w-max flex justify-start lg:justify-center">
+              <div className="relative shadow-2xl border border-gray-800 rounded-sm overflow-hidden bg-white" style={{ width: '794px', height: '1123px' }}>
+                <div className="absolute inset-0 overflow-y-auto bg-white">
+                  <PrintLetter 
+                    letter={letter}
+                    profile={profile}
+                    office={office}
+                    recipient={recipients.find(r => r.id === letter.recipient_id)}
+                    officers={officers}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
