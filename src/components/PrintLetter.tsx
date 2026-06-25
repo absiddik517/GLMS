@@ -1,6 +1,6 @@
 import React from 'react';
 import { Letter, UserProfile, Office, Recipient, Officer } from '../types';
-import { countToBangla, getGovtFormattedDate } from '../utils/banglaHelpers';
+import { countToBangla, getGovtFormattedDate, getBengaliCalendarDate, formatBanglaDate } from '../utils/banglaHelpers';
 
 interface PrintLetterProps {
   letter: Letter;
@@ -44,13 +44,33 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       id="govt-letter-print-area"
       style={{ 
         fontFamily: '"Noto Sans Bengali", "Inter", sans-serif',
-        lineHeight: '1.8'
+        lineHeight: '1.2'
       }}
     >
       {/* 1. GOVERNMENT SEAL AND OFFICIAL HEADERS */}
-      <div className="relative mb-8 text-center pb-2 w-full">
+      <div className="relative text-center w-full min-h-[70px] pb-4">
+        {/* Left Logo */}
+        <div className="absolute left-0 top-0 select-none">
+          <img 
+            src="https://upload.wikimedia.org/wikipedia/commons/8/84/Government_Seal_of_Bangladesh.svg" 
+            alt="গণপ্রজাতন্ত্রী বাংলাদেশ সরকার সিল" 
+            className="h-16 w-16 object-contain"
+            referrerPolicy="no-referrer"
+          />
+        </div>
+
+        {/* Right Logo */}
+        <div className="absolute right-0 top-0 select-none">
+          <img 
+            src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ1jipO8vnuNDm1qwUZPkLvjXbnHY8ESNuqBFyaE-UBVI4ESwy0Af6U2uw&s=10" 
+            alt="মুজিব ১০০ লোগো" 
+            className="h-14 w-auto object-contain"
+            referrerPolicy="no-referrer"
+          />
+        </div>
+
         {/* Centered official header details without any logos or seals, matching the photo */}
-        <div className="w-full text-black">
+        <div className="w-full text-black px-20">
           <h1 className="text-lg font-bold leading-tight tracking-wide text-black">
             গণপ্রজাতন্ত্রী বাংলাদেশ সরকার
           </h1>
@@ -74,18 +94,23 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       </div>
 
       {/* 2. MEMO NUMBER AND DATE SECTION */}
-      <div className="flex justify-between items-start text-xs pb-3 mb-6 select-none leading-relaxed text-black gap-4">
+      <div className="flex justify-between items-center text-xs select-none leading-relaxed text-black gap-4 mb-4">
         <div className="flex-1 font-semibold text-black">
-          স্মারক নম্বর: <span className="font-mono text-xs text-black">{countToBangla(letter.memo_no)}</span>
+          স্মারক নং <span className="font-sans text-xs text-black">{countToBangla(letter.memo_no)}</span>
         </div>
-        <div className="text-right font-semibold text-black shrink-0">
-          তারিখ: <span className="font-sans text-black">{getGovtFormattedDate(letter.issue_date)}</span>
+        <div className="flex items-center text-black shrink-0">
+          <span className="mr-2 font-semibold text-black">তারিখ:</span>
+          <div className="inline-flex flex-col items-center text-center">
+            <div className="px-2 text-xs text-black font-semibold pb-1">{getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ</div>
+            <div className="w-full border-t border-black"></div>
+            <div className="px-2 text-xs text-black font-semibold pt-1">{formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ</div>
+          </div>
         </div>
       </div>
 
       {/* 3. TYPE HEADINGS (Center title for specific letter types like notice, circular, office order) */}
       {headerTitle && (
-        <div className="text-center font-bold text-lg pb-1 mb-6 text-black">
+        <div className="text-center font-bold text-lg pb-1 text-black">
           {headerTitle}
         </div>
       )}
@@ -145,7 +170,6 @@ export default function PrintLetter({ letter, profile, office, recipient, office
 
         {/* Signatory on the Right Column */}
         <div className="text-right text-sm leading-snug text-black">
-          <div className="h-16"></div>
           {selectedOfficer ? (
             <>
               <p className="font-bold text-black">{selectedOfficer.name}</p>
@@ -170,20 +194,41 @@ export default function PrintLetter({ letter, profile, office, recipient, office
         </div>
       </div>
 
+      {/* 7.5 ATTACHMENTS SECTION (If any exist) */}
+      {letter.attachments && letter.attachments.length > 0 && (
+        <div className="mb-4 text-xs text-black leading-relaxed select-none" id="attachments-print-block">
+          <p className="font-bold underline mb-1 text-black">সংযুক্তি:</p>
+          <div className="space-y-0.5 text-black pl-2">
+            {letter.attachments.map((attach, idx) => (
+              <div key={idx} className="flex items-start text-black">
+                <span className="w-4 shrink-0 text-left font-semibold">{countToBangla(idx + 1)}.</span>
+                <span className="flex-1">{attach}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 8. COPY RECIPIENTS SECTION (If any exist) */}
       {letter.copy_recipients && letter.copy_recipients.length > 0 && (
-        <div className="mt-12 pt-4 text-xs text-black leading-relaxed select-none" id="copy-rec-print-block">
+        <div className="text-xs text-black leading-relaxed select-none" id="copy-rec-print-block">
           <p className="font-bold underline mb-1 text-black">অনুলিপি জ্ঞাতার্থে ও কার্যার্থে প্রেরিত হলো:</p>
-          <ol className="list-decimal pl-5 text-black">
+          <div className="space-y-0.5 text-black pl-2">
             {letter.copy_recipients.map((cr, idx) => (
-              <li key={cr.id || idx} className="text-black">
-                {[cr.recipient_name, cr.designation, cr.organization, cr.address]
-                  .filter(Boolean)
-                  .join(', ')}
-              </li>
+              <div key={cr.id || idx} className="flex items-start text-black">
+                <span className="w-4 shrink-0 text-left font-semibold">{countToBangla(idx + 1)}.</span>
+                <span className="flex-1">
+                  {[cr.recipient_name, cr.designation, cr.organization, cr.address]
+                    .filter(Boolean)
+                    .join(', ')}
+                </span>
+              </div>
             ))}
-            <li className="text-black">জরুরি অফিস ফাইল।</li>
-          </ol>
+            <div className="flex items-start text-black">
+              <span className="w-4 shrink-0 text-left font-semibold">{countToBangla(letter.copy_recipients.length + 1)}.</span>
+              <span className="flex-1">জরুরি অফিস ফাইল।</span>
+            </div>
+          </div>
         </div>
       )}
     </div>

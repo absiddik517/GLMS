@@ -61,12 +61,28 @@ export async function logAuditAction(
 // OFFICE SERVICE
 // ==========================================
 export async function getOffice(officeId: string): Promise<Office | null> {
-  const docRef = doc(db, 'offices', officeId);
-  const snap = await getDoc(docRef);
-  if (snap.exists()) {
-    return snap.data() as Office;
+  try {
+    const docRef = doc(db, 'offices', officeId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data() as Office;
+      // Cache it
+      localStorage.setItem(`office_${officeId}`, JSON.stringify(data));
+      return data;
+    }
+    return null;
+  } catch (error) {
+    console.warn(`getOffice offline fallback for ${officeId}:`, error);
+    const cached = localStorage.getItem(`office_${officeId}`);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as Office;
+      } catch (e) {
+        // ignore
+      }
+    }
+    return null;
   }
-  return null;
 }
 
 export async function createOrGetOffice(officeId: string, defaultData: Partial<Office>): Promise<Office> {
@@ -88,41 +104,87 @@ export async function createOrGetOffice(officeId: string, defaultData: Partial<O
     updated_at: new Date().toISOString(),
   };
 
-  await setDoc(doc(db, 'offices', officeId), newOffice);
-  
-  // Seed default classifications for a new office
-  await seedDefaultSubjectClassifications(officeId);
+  // Cache locally
+  localStorage.setItem(`office_${officeId}`, JSON.stringify(newOffice));
+
+  try {
+    await setDoc(doc(db, 'offices', officeId), newOffice);
+    // Seed default classifications for a new office
+    await seedDefaultSubjectClassifications(officeId);
+  } catch (error) {
+    console.warn(`Failed to set office on server, operating offline:`, error);
+  }
   
   return newOffice;
 }
 
 export async function updateOffice(officeId: string, data: Partial<Office>): Promise<void> {
-  const docRef = doc(db, 'offices', officeId);
-  await updateDoc(docRef, {
-    ...data,
-    updated_at: new Date().toISOString()
-  });
+  const cached = localStorage.getItem(`office_${officeId}`);
+  if (cached) {
+    try {
+      const officeObj = JSON.parse(cached) as Office;
+      const updated = { ...officeObj, ...data, updated_at: new Date().toISOString() };
+      localStorage.setItem(`office_${officeId}`, JSON.stringify(updated));
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  try {
+    const docRef = doc(db, 'offices', officeId);
+    await updateDoc(docRef, {
+      ...data,
+      updated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.warn(`Failed to update office on server, saved locally:`, error);
+  }
 }
 
 // ==========================================
 // USER PROFILE SERVICE
 // ==========================================
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
-  const docRef = doc(db, 'users', userId);
-  const snap = await getDoc(docRef);
-  if (snap.exists()) {
-    return snap.data() as UserProfile;
+  try {
+    const docRef = doc(db, 'users', userId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data() as UserProfile;
+      // Cache it
+      localStorage.setItem(`user_profile_${userId}`, JSON.stringify(data));
+      return data;
+    }
+    return null;
+  } catch (error) {
+    console.warn(`getUserProfile offline fallback for ${userId}:`, error);
+    const cached = localStorage.getItem(`user_profile_${userId}`);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as UserProfile;
+      } catch (e) {
+        // ignore
+      }
+    }
+    return null;
   }
-  return null;
 }
 
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
-  const docRef = doc(db, 'users', profile.id);
   const cleanData = cleanFirestorePayload(profile);
-  await setDoc(docRef, {
+  const updatedProfile = {
     ...cleanData,
     updated_at: new Date().toISOString()
-  });
+  };
+
+  // Cache locally
+  localStorage.setItem(`user_profile_${profile.id}`, JSON.stringify(updatedProfile));
+
+  try {
+    const docRef = doc(db, 'users', profile.id);
+    await setDoc(docRef, updatedProfile);
+  } catch (error) {
+    console.warn(`Failed to save user profile on server, cached locally:`, error);
+  }
 }
 
 // ==========================================

@@ -17,7 +17,8 @@ import {
   Building,
   User,
   FolderPlus,
-  Folder
+  Folder,
+  Paperclip
 } from 'lucide-react';
 import { Letter, NothiFile, Recipient, SubjectClassification, CopyRecipient, LetterType, Officer, CopyPreset } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -81,6 +82,20 @@ export default function LetterFormView({
   const [newCopyName, setNewCopyName] = useState('');
   const [newCopyDesignation, setNewCopyDesignation] = useState('');
   const [newCopyOrg, setNewCopyOrg] = useState('');
+
+  // For attachments additions
+  const [attachments, setAttachments] = useState<string[]>(letter?.attachments || []);
+  const [newAttachment, setNewAttachment] = useState('');
+
+  const addAttachment = () => {
+    if (!newAttachment.trim()) return;
+    setAttachments([...attachments, newAttachment.trim()]);
+    setNewAttachment('');
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(attachments.filter((_, idx) => idx !== index));
+  };
 
   // Auto memo number preview block
   const [loadingMemo, setLoadingMemo] = useState(false);
@@ -446,6 +461,7 @@ export default function LetterFormView({
         notes: notes,
         created_by: user?.uid || '',
         copy_recipients: copyRecipients,
+        attachments: attachments,
         recipient_display_options: {
           show_name: showName,
           show_designation: showDesignation,
@@ -562,6 +578,59 @@ export default function LetterFormView({
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">চিঠিপত্রের মূল বিবরণী (Rich Text Body)</label>
             <Editor value={body} onChange={setBody} />
+          </div>
+
+          {/* Attachments Section (সংযুক্তি) */}
+          <div className="pt-4 border-t border-gray-100">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+              <Paperclip size={16} className="text-[#006A4E]" />
+              <span>সংযুক্তি যোগ করুন (Attachments / Enclosures)</span>
+            </h3>
+            
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={newAttachment}
+                onChange={(e) => setNewAttachment(e.target.value)}
+                placeholder="সংযুক্তির বিবরণ (উদা: প্রশিক্ষণ নির্দেশিকা - ০২ ফর্দ)"
+                className="flex-1 p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addAttachment();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={addAttachment}
+                className="px-3 py-1.5 bg-[#006A4E]/10 text-[#006A4E] hover:bg-[#006A4E]/16 hover:bg-opacity-80 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
+              >
+                <Plus size={14} />
+                যুক্ত করুন
+              </button>
+            </div>
+
+            {attachments.length > 0 && (
+              <div className="space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                {attachments.map((attach, idx) => (
+                  <div key={idx} className="flex justify-between items-center bg-white p-2 border border-gray-150 rounded text-xs">
+                    <span>
+                      <strong className="font-mono text-gray-400 mr-2">{countToBangla(idx + 1)}.</strong>
+                      {attach}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(idx)}
+                      className="text-red-500 hover:text-red-700 transition"
+                      title="মুছুন"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Copy Recipients Section (অনুলিপি) */}

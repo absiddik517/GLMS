@@ -16,7 +16,8 @@ import {
   HelpCircle,
   FileText,
   Palette,
-  Scissors
+  Scissors,
+  ChevronsRight
 } from 'lucide-react';
 
 interface EditorProps {
@@ -47,6 +48,13 @@ export default function Editor({ value, onChange, placeholder = 'এখানে
     document.execCommand(command, false, arg);
     handleInput();
     editorRef.current?.focus();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      execCommand('insertHTML', '&nbsp;&nbsp;&nbsp;&nbsp;');
+    }
   };
 
   const insertTable = () => {
@@ -210,6 +218,16 @@ export default function Editor({ value, onChange, placeholder = 'এখানে
           <ListOrdered size={16} />
         </button>
 
+        <button
+          type="button"
+          onClick={() => execCommand('insertHTML', '&nbsp;&nbsp;&nbsp;&nbsp;')}
+          className="p-1 px-2 rounded text-gray-700 hover:bg-gray-200 transition flex items-center gap-1 text-[11px] font-bold"
+          title="ট্যাব দিন (Tab / ৪টি স্পেস)"
+        >
+          <ChevronsRight size={14} className="text-[#006A4E]" />
+          <span>ট্যাব</span>
+        </button>
+
         <div className="w-px h-6 bg-gray-300 mx-1"></div>
 
         {/* Color Picker */}
@@ -299,6 +317,7 @@ export default function Editor({ value, onChange, placeholder = 'এখানে
         contentEditable
         suppressContentEditableWarning={true}
         onInput={handleInput}
+        onKeyDown={handleKeyDown}
         className="p-5 font-sans min-h-[400px] max-h-[600px] overflow-y-auto focus:outline-none prose prose-slate max-w-none prose-sm sm:prose-base leading-relaxed"
         style={{ fontFamily: '"Noto Sans Bengali", "Inter", sans-serif' }}
       ></div>
