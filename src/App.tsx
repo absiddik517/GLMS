@@ -71,6 +71,9 @@ function AppContent() {
   const [copyPresets, setCopyPresets] = useState<CopyPreset[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   
+  // Cloned letter template state
+  const [clonedLetter, setClonedLetter] = useState<Letter | null>(null);
+  
   const [dataLoading, setDataLoading] = useState(false);
 
   // Real-time Firestore synchronized listeners (isolated by current user's office_id)
@@ -274,6 +277,24 @@ function AppContent() {
       handleReloadLogs();
       setCurrentTab('letters');
     }
+  };
+
+  const handleLetterClone = (letterId: string) => {
+    const lObj = letters.find(l => l.id === letterId);
+    if (!lObj) return;
+
+    // Create a clone but strip out unique ID and issue metadata so it's a clean new draft
+    const clone: Letter = {
+      ...lObj,
+      id: '', // Will be saved as a brand new doc
+      status: 'draft',
+      memo_no: '',
+      serial_no: '',
+      issue_date: new Date().toISOString().split('T')[0],
+    };
+
+    setClonedLetter(clone);
+    setCurrentTab('create_letter');
   };
 
   const handleLetterArchive = async (letterId: string) => {
@@ -502,6 +523,7 @@ function AppContent() {
                   onClick={() => {
                     setCurrentTab(item.id);
                     setSelectedLetterId(null);
+                    setClonedLetter(null); // Clear clone state on manual nav
                     setSidebarOpen(false); // Close mobile sidebar
                   }}
                   className={`w-full flex items-center gap-3 px-5 py-2 text-xs font-bold transition-all cursor-pointer border-l-4 ${
@@ -607,19 +629,27 @@ function AppContent() {
               onArchiveLetter={handleLetterArchive}
               onRestoreLetter={handleLetterRestore}
               onCreateLetter={() => setCurrentTab('create_letter')}
+              onCloneLetter={handleLetterClone}
               initialShowArchived={false}
             />
           )}
 
           {currentTab === 'create_letter' && (
             <LetterFormView 
+              letter={clonedLetter || undefined}
               files={files}
               classifications={classifications}
               recipients={recipients}
               officers={officers}
               copyPresets={copyPresets}
-              onSave={handleLetterSave}
-              onCancel={() => setCurrentTab('letters')}
+              onSave={async (data, issueNow) => {
+                await handleLetterSave(data, issueNow);
+                setClonedLetter(null);
+              }}
+              onCancel={() => {
+                setClonedLetter(null);
+                setCurrentTab('letters');
+              }}
             />
           )}
 
@@ -656,6 +686,7 @@ function AppContent() {
               onRestore={() => handleLetterRestore(activeLetter.id)}
               onDelete={() => handleLetterDelete(activeLetter.id)}
               onLogPrint={handleLogLetterPrint}
+              onClone={() => handleLetterClone(activeLetter.id)}
             />
           )}
 

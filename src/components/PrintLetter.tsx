@@ -46,8 +46,8 @@ export default function PrintLetter({ letter, profile, office, recipient, office
   const orgAddressLine4 = office?.org_address_line4 || office?.address || 'হালুয়াঘাট, ময়মনসিংহ';
 
   const qrData = [
-    `প্রতিষ্ঠানের নাম: ${orgNameLine3}`,
-    `প্রতিষ্ঠানের ঠিকানা: ${orgAddressLine4}`,
+    `${orgNameLine3}`,
+    `${orgAddressLine4}`,
     `স্মারক নং: ${countToBangla(letter.memo_no)}`,
     `তারিখ: ${getBengaliCalendarDate(letter.issue_date)} বঙ্গাব্দ, ${formatBanglaDate(letter.issue_date)} খ্রিষ্টাব্দ`,
     `বিষয়: ${letter.subject || ''}`
@@ -131,7 +131,7 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       {letter.letter_type !== 'office_order' && letter.subject && (
         <div className="mb-2 text-sm leading-relaxed text-black" id="subject-print-block">
           <p className="font-bold text-black">
-            বিষয়: <span className="underline font-semibold text-black">{letter.subject}</span>
+            বিষয়: <span className="font-semibold text-black">{letter.subject}</span>
           </p>
           {letter.notes && letter.notes.trim() && letter.letter_type === 'standard' && (
             <p className="text-xs text-black mt-1">
@@ -149,8 +149,8 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       ></div>
 
       {/* 7. GRID LAYOUT: RECIPIENT (LEFT) AND SIGNATORY/SENDER (RIGHT) */}
-      {/* Keeping a 20pt/27px space on top of the grid for signing */}
-      <div className="grid grid-cols-2 gap-8 text-sm select-none mt-[20pt] pb-6 items-start text-black w-full">
+      {/* Keeping a 30pt space on top of the grid for signing */}
+      <div className="grid grid-cols-2 gap-8 text-sm select-none mt-[30pt] pb-2 items-start text-black w-full">
         {/* Recipient on the Left Column */}
         <div className="text-left">
           {isStandard && letter.recipient_id && (
@@ -249,7 +249,7 @@ export default function PrintLetter({ letter, profile, office, recipient, office
       )}
 
       {/* 9. QR CODE SECTION */}
-      <div className="mt-8 flex justify-start select-none" id="qr-code-print-block">
+      <div className="mt-3 flex justify-start select-none" id="qr-code-print-block">
         <QRCodeSVG
           value={qrData}
           size={60}

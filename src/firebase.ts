@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import { initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase with the auto-provisioned configuration
@@ -17,8 +17,12 @@ export const auth = getAuth(app);
 
 // Use custom named database if provisioned in configuration
 const dbId = firebaseConfig.firestoreDatabaseId;
+const settings = {
+  experimentalForceLongPolling: true,
+};
+
 export const db = dbId && dbId !== '(default)'
-  ? getFirestore(app, dbId)
-  : getFirestore(app);
+  ? initializeFirestore(app, settings, dbId)
+  : initializeFirestore(app, settings);
 
 export default app;

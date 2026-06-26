@@ -13,7 +13,8 @@ import {
   Inbox,
   Calendar,
   X,
-  Sparkles
+  Sparkles,
+  Copy
 } from 'lucide-react';
 import { Letter, NothiFile, Recipient } from '../types';
 import { countToBangla, countToEnglish, formatBanglaDate } from '../utils/banglaHelpers';
@@ -65,6 +66,7 @@ interface LetterListViewProps {
   onArchiveLetter: (letterId: string) => void;
   onRestoreLetter: (letterId: string) => void;
   onCreateLetter: () => void;
+  onCloneLetter?: (letterId: string) => void;
   initialShowArchived?: boolean;
 }
 
@@ -78,6 +80,7 @@ export default function LetterListView({
   onArchiveLetter,
   onRestoreLetter,
   onCreateLetter,
+  onCloneLetter,
   initialShowArchived = false
 }: LetterListViewProps) {
   
@@ -371,6 +374,17 @@ export default function LetterListView({
                         >
                           <Eye size={16} />
                         </button>
+
+                        {/* Clone Letter */}
+                        {onCloneLetter && (
+                          <button
+                            onClick={() => onCloneLetter(l.id)}
+                            className="p-1 px-2 text-[#006A4E] hover:bg-emerald-50 rounded-lg transition cursor-pointer"
+                            title="এই চিঠিটি ক্লোন (কপি) করে নতুন খসড়া তৈরি করুন"
+                          >
+                            <Copy size={16} />
+                          </button>
+                        )}
 
                         {/* Edit or Delete for Draft; Archive for Issued; Restore for Archived */}
                         {l.status === 'draft' ? (

@@ -14,11 +14,14 @@ import {
   HelpCircle,
   ShieldAlert,
   Maximize2,
-  Minimize2
+  Minimize2,
+  X,
+  Copy
 } from 'lucide-react';
 import { Letter, UserProfile, Office, NothiFile, Recipient, Officer } from '../types';
 import PrintLetter from './PrintLetter';
 import { countToBangla } from '../utils/banglaHelpers';
+import { downloadDOCX } from '../utils/docxGenerator';
 
 interface LetterDetailViewProps {
   letter: Letter;
@@ -33,6 +36,7 @@ interface LetterDetailViewProps {
   onRestore: () => void;
   onDelete: () => void;
   onLogPrint: () => void;
+  onClone?: () => void;
 }
 
 export default function LetterDetailView({
@@ -47,11 +51,13 @@ export default function LetterDetailView({
   onArchive,
   onRestore,
   onDelete,
-  onLogPrint
+  onLogPrint,
+  onClone
 }: LetterDetailViewProps) {
   
   const printAreaRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingDocx, setIsDownloadingDocx] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
 
   // Directly generate and download the PDF
@@ -235,6 +241,28 @@ export default function LetterDetailView({
     }
   };
 
+  // Directly generate and download the Word Document (DOCX)
+  const handleDownloadDOCX = async () => {
+    // Log DOCX download activity as an export/print log event
+    onLogPrint();
+    setIsDownloadingDocx(true);
+    try {
+      const rec = recipients.find(r => r.id === letter.recipient_id);
+      await downloadDOCX({
+        letter,
+        profile,
+        office,
+        recipient: rec,
+        officers
+      });
+    } catch (err) {
+      console.error('DOCX Download Error:', err);
+      alert('সরাসরি ডকএক্স ডাউনলোডে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+    } finally {
+      setIsDownloadingDocx(false);
+    }
+  };
+
   const getRecipientName = () => {
     if (!letter.recipient_id) return '-';
     const rec = recipients.find(r => r.id === letter.recipient_id);
@@ -369,6 +397,20 @@ export default function LetterDetailView({
             {isDownloading ? 'পিডিএফ তৈরি হচ্ছে...' : 'পিডিএফ ডাউনলোড'}
           </button>
 
+          {/* Direct DOCX Download button */}
+          <button
+            onClick={handleDownloadDOCX}
+            disabled={isDownloadingDocx}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+              isDownloadingDocx 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                : 'bg-[#185ABD] hover:bg-opacity-95 text-white'
+            }`}
+          >
+            <Download size={14} className={isDownloadingDocx ? 'animate-bounce' : ''} />
+            {isDownloadingDocx ? 'ডকএক্স তৈরি হচ্ছে...' : 'ডকএক্স ডাউনলোড'}
+          </button>
+
           {/* Full Screen option */}
           <button
             onClick={() => setIsFullScreen(true)}
@@ -377,6 +419,18 @@ export default function LetterDetailView({
             <Maximize2 size={14} />
             ফুল স্ক্রিন
           </button>
+
+          {/* Clone/Copy option */}
+          {onClone && (
+            <button
+              onClick={onClone}
+              className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              title="এই চিঠিটি কপি করে নতুন খসড়া তৈরি করুন"
+            >
+              <Copy size={14} />
+              চিঠি ক্লোন (কপি) করুন
+            </button>
+          )}
 
           {/* Conditional Controls */}
           {letter.status === 'draft' ? (
@@ -466,7 +520,7 @@ export default function LetterDetailView({
           </button>
         </div>
         <div className="w-full overflow-x-auto bg-gray-50 border border-gray-200 p-4 md:p-6 rounded-xl shadow-inner">
-          <div className="min-w-max flex justify-start lg:justify-center">
+          <div className="mx-auto" style={{ width: '794px' }}>
             <div className="relative shadow-lg border border-gray-100 rounded-sm overflow-hidden bg-white" style={{ width: '794px', height: '1123px' }}>
               <div className="absolute inset-0 overflow-y-auto bg-white" style={{ scrollbarWidth: 'thin' }}>
                 <PrintLetter 
@@ -484,44 +538,27 @@ export default function LetterDetailView({
 
       {/* FULL SCREEN MODAL */}
       {isFullScreen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-4 md:p-8 no-print">
-          {/* Full Screen Header */}
-          <div className="w-full max-w-[840px] flex justify-between items-center text-white mb-4">
-            <div>
-              <h3 className="font-bold text-lg">পত্রের পূর্ণাঙ্গ প্রাকদর্শন (A4 সাইজ)</h3>
-              <p className="text-xs text-gray-300 mt-0.5">{letter.subject || 'সরকারি পত্র'}</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handlePrint}
-                className="bg-white text-gray-900 hover:bg-gray-100 px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
-              >
-                <Printer size={13} />
-                প্রিন্ট করুন
-              </button>
-              <button
-                onClick={() => setIsFullScreen(false)}
-                className="bg-red-600 hover:bg-red-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
-              >
-                <Minimize2 size={13} />
-                বন্ধ করুন
-              </button>
-            </div>
-          </div>
+        <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-auto p-4 md:p-8 no-print">
+          {/* Floating Close Button in Top-Right Corner */}
+          <button
+            onClick={() => setIsFullScreen(false)}
+            className="fixed top-4 right-4 z-50 bg-red-600 hover:bg-red-700 text-white p-3 rounded-full shadow-lg transition-all hover:scale-105 cursor-pointer flex items-center justify-center border border-red-500"
+            title="বন্ধ করুন"
+          >
+            <X size={20} />
+          </button>
 
-          {/* A4 Container in Full Screen */}
-          <div className="w-full max-w-[840px] bg-gray-900/40 p-4 rounded-xl overflow-x-auto shadow-inner mb-6">
-            <div className="min-w-max flex justify-start lg:justify-center">
-              <div className="relative shadow-2xl border border-gray-800 rounded-sm overflow-hidden bg-white" style={{ width: '794px', height: '1123px' }}>
-                <div className="absolute inset-0 overflow-y-auto bg-white">
-                  <PrintLetter 
-                    letter={letter}
-                    profile={profile}
-                    office={office}
-                    recipient={recipients.find(r => r.id === letter.recipient_id)}
-                    officers={officers}
-                  />
-                </div>
+          {/* Centered A4 viewport with horizontal/vertical safety alignment */}
+          <div className="mx-auto my-4" style={{ width: '794px' }}>
+            <div className="relative shadow-2xl border border-gray-800 rounded-sm overflow-hidden bg-white" style={{ width: '794px', height: '1123px' }}>
+              <div className="absolute inset-0 overflow-y-auto bg-white">
+                <PrintLetter 
+                  letter={letter}
+                  profile={profile}
+                  office={office}
+                  recipient={recipients.find(r => r.id === letter.recipient_id)}
+                  officers={officers}
+                />
               </div>
             </div>
           </div>
