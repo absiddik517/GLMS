@@ -209,25 +209,48 @@ export async function getSubjectClassifications(officeId: string): Promise<Subje
   return list.sort((a, b) => a.code.localeCompare(b.code));
 }
 
-export async function saveSubjectClassification(classification: Omit<SubjectClassification, 'id'> & { id?: string }): Promise<void> {
+export async function saveSubjectClassification(classification: Omit<SubjectClassification, 'id'> & { id?: string }): Promise<string> {
+  const cleaned: any = {};
+  Object.keys(classification).forEach((key) => {
+    const val = (classification as any)[key];
+    if (val !== undefined) {
+      cleaned[key] = val;
+    }
+  });
+
   if (classification.id) {
     const docRef = doc(db, 'subject_classifications', classification.id);
-    await setDoc(docRef, classification, { merge: true });
+    await setDoc(docRef, cleaned, { merge: true });
+    return classification.id;
   } else {
     const classificationsRef = collection(db, 'subject_classifications');
-    await addDoc(classificationsRef, classification);
+    const docRef = await addDoc(classificationsRef, cleaned);
+    return docRef.id;
   }
 }
 
 async function seedDefaultSubjectClassifications(officeId: string) {
   const defaults = [
-    { code: '০১', title: 'প্রশাসন', description: 'প্রশাসনিক চিঠিপত্র ও আদেশ' },
-    { code: '০২', title: 'অর্থ', description: 'বাজেট, হিসাব ও অর্থ সংক্রান্ত' },
-    { code: '০৩', title: 'প্রশিক্ষণ', description: 'প্রশিক্ষণ ও কর্মশালা সংক্রান্ত' },
-    { code: '০৪', title: 'শিক্ষা', description: 'শিক্ষা কর্মসূচি ও উপকরণ' },
-    { code: '০৫', title: 'মানবসম্পদ', description: 'কর্মকর্তা/কর্মচারী তথ্যাদি ও ছুটি' },
-    { code: '০৬', title: 'সভা', description: 'সভা আহ্বান ও সিদ্ধান্ত সমূহ' },
-    { code: '০৭', title: 'অফিস আদেশ', description: 'জরুরি দাপ্তরিক অফিস আদেশ' },
+    { code: '০১', title: 'অডিট', description: 'অডিট সংক্রান্ত নিরীক্ষা ও আপত্তি', keywords: ['অডিট', 'নিরীক্ষা', 'আপত্তি', 'audit'] },
+    { code: '০৬', title: 'কমিটি গঠন/সভা/কার্যবিবরণী', description: 'কমিটি গঠন, সভা ও কার্যবিবরণী সংক্রান্ত', keywords: ['কমিটি', 'সভা', 'কার্যবিবরণী', 'রেজুলেশন', 'meeting', 'committee'] },
+    { code: '০৭', title: 'ক্রয় প্রক্রিয়াকরণ', description: 'ক্রয় প্রক্রিয়া করণ', keywords: ['ক্রয়', 'দরপত্র', 'টেন্ডার', 'procurement', 'tender', 'purchase'] },
+    { code: '০৮', title: 'ছুটি সংক্রান্ত', description: 'ছুটি সংক্রান্ত আবেদন ও অনুমোদন', keywords: ['ছুটি', 'নৈমিত্তিক', 'অর্জিত', 'leave', 'casual'] },
+    { code: '১০', title: 'টেলিফোন সংযোগ', description: 'টেলিফোন ও ইন্টারনেট সংযোগ সংক্রান্ত', keywords: ['টেলিফোন', 'ইন্টারনেট', 'ব্রডব্যান্ড', 'সংযোগ', 'telephone', 'internet'] },
+    { code: '১১', title: 'নিয়োগ সংক্রান্ত', description: 'নিয়োগ ও নিয়োগ বিধি সংক্রান্ত', keywords: ['নিয়োগ', 'নিয়োগ বিজ্ঞপ্তি', 'বিজ্ঞপ্তি', 'recruitment', 'appoint'] },
+    { code: '১২', title: 'পদোন্নতি', description: 'পদোন্নতি সংক্রান্ত নথি', keywords: ['পদোন্নতি', 'promotion', 'গ্রেড'] },
+    { code: '১৩', title: 'পেনশন', description: 'পেনশন সংক্রান্ত নথি', keywords: ['পেনশন', 'অবসর', 'pension', 'lpr'] },
+    { code: '১৪', title: 'প্রকল্প বাস্তবায়ন', description: 'প্রকল্প বাস্তবায়ন ও অগ্রগতি', keywords: ['প্রকল্প', 'বাস্তবায়ন', 'অগ্রগতি', 'project', 'dpp'] },
+    { code: '১৬', title: 'প্রতিবেদন প্রেরণ/সংরক্ষণ', description: 'প্রতিবেদন প্রেরণ/সংরক্ষণ সংক্রান্ত', keywords: ['প্রতিবেদন', 'রিপোর্ট', 'সংরক্ষণ', 'report'] },
+    { code: '১৮', title: 'প্রশাসনিক অফিস আদেশ', description: 'প্রশাসনিক অফিস আদেশ ও নির্দেশিকা', keywords: ['অফিস আদেশ', 'প্রশাসনিক', 'অফিস', 'আদেশ', 'order'] },
+    { code: '২০', title: 'বাজেট বরাদ্দ সংক্রান্ত', description: 'বাজেট বরাদ্দ সংক্রান্ত নথি', keywords: ['বাজেট', 'বরাদ্দ', 'অর্থ', 'অনুমোদন', 'budget', 'allocation'] },
+    { code: '২১', title: 'বার্ষিক গোপনীয় প্রতিবেদন', description: 'বার্ষিক গোপনীয় প্রতিবেদন (ACR)', keywords: ['বার্ষিক গোপনীয় প্রতিবেদন', 'গোপনীয়', 'এসিআর', 'acr', 'annual confidential report'] },
+    { code: '২৩', title: 'বিভিন্ন দিবস উদযাপন', description: 'বিভিন্ন জাতীয় ও আন্তর্জাতিক দিবস উদযাপন', keywords: ['দিবস', 'উদযাপন', 'বিজয় দিবস', 'স্বাধীনতা দিবস', '২১শে ফেব্রুয়ারি', 'day'] },
+    { code: '২৫', title: 'ভ্রমন/প্রशिक्ণ', description: 'ভ্রমন/প্রশিক্ষণ সংক্রান্ত নথি', keywords: ['ভ্রমণ', 'ভ্রমণ আদেশ', 'প্রশিক্ষণ', 'tour', 'training'] },
+    { code: '২৬', title: 'যানবাহন/ক্রয়/জ্বালানী', description: 'যানবাহন, ক্রয় ও জ্বালানী সংক্রান্ত', keywords: ['যানবাহন', 'জ্বালানী', 'গাড়ি', 'পেট্রোল', 'অকটেন', 'ডিজেল', 'fuel', 'vehicle'] },
+    { code: '২৭', title: 'তদন্ত/অভিযোগ', description: 'তদন্ত/অভিযোগ সংক্রান্ত নথি', keywords: ['তদন্ত', 'অভিযোগ', 'শাস্তি', 'বিভাগীয় মামলা', 'investigation', 'complaint'] },
+    { code: '২৯', title: 'সেমিনার / ওয়ার্কশপ', description: 'সেমিনার ও ওয়ার্কশপ সংক্রান্ত', keywords: ['সেমিনার', 'ওয়ার্কশপ', 'আলোচনা সভা', 'seminar', 'workshop'] },
+    { code: '৩১ হতে ৯৮ পর্যন্ত', title: 'অন্যান্য নথি', description: 'অন্যান্য অনির্ধারিত নথি সমূহ', keywords: ['অন্যান্য', 'অন্য', 'অন্যান্য নথি', 'others'] },
+    { code: '৯৯', title: 'বিবিধ', description: 'বিবিধ তথ্য ও নথি', keywords: ['বিবিধ', 'misc', 'miscellaneous'] }
   ];
 
   for (const item of defaults) {
@@ -236,9 +259,28 @@ async function seedDefaultSubjectClassifications(officeId: string) {
       code: item.code,
       title: item.title,
       description: item.description,
+      keywords: (item as any).keywords || [],
       active: true,
     });
   }
+}
+
+export async function deleteSubjectClassification(id: string): Promise<void> {
+  const docRef = doc(db, 'subject_classifications', id);
+  await deleteDoc(docRef);
+}
+
+export async function clearAndReSeedSubjectClassifications(officeId: string): Promise<void> {
+  const classificationsRef = collection(db, 'subject_classifications');
+  const q = query(
+    classificationsRef, 
+    where('office_id', '==', officeId)
+  );
+  const snap = await getDocs(q);
+  for (const docSnap of snap.docs) {
+    await deleteDoc(doc(db, 'subject_classifications', docSnap.id));
+  }
+  await seedDefaultSubjectClassifications(officeId);
 }
 
 // ==========================================

@@ -18,14 +18,15 @@ import {
   User,
   FolderPlus,
   Folder,
-  Paperclip
+  Paperclip,
+  Sparkles
 } from 'lucide-react';
 import { Letter, NothiFile, Recipient, SubjectClassification, CopyRecipient, LetterType, Officer, CopyPreset } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import Editor from './Editor';
 import { generateNextMemoNumber } from '../utils/memoGenerator';
 import { countToBangla, padLeft } from '../utils/banglaHelpers';
-import { saveRecipient, saveOfficer, saveFile, saveCopyPreset, deleteCopyPreset, getLetters, saveSubjectClassification } from '../services/store';
+import { saveRecipient, saveOfficer, saveFile, saveCopyPreset, deleteCopyPreset, getLetters, saveSubjectClassification, saveLetter } from '../services/store';
 
 interface LetterFormViewProps {
   letter?: Letter; // If editing
@@ -50,6 +51,11 @@ export default function LetterFormView({
 }: LetterFormViewProps) {
   const { office, profile, user } = useAuth();
 
+  // Local state to track current letter ID (can be updated during auto-save)
+  const [currentLetterId, setCurrentLetterId] = useState<string | null>(letter?.id || null);
+  const [lastSavedJSON, setLastSavedJSON] = useState('');
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'failed' | string>('idle');
+
   // Form states
   const [letterType, setLetterType] = useState<LetterType>(letter?.letter_type || 'standard');
   const [selectedFileId, setSelectedFileId] = useState(letter?.file_id || '');
@@ -60,6 +66,7 @@ export default function LetterFormView({
   const [newClassificationCode, setNewClassificationCode] = useState('');
   const [newClassificationTitle, setNewClassificationTitle] = useState('');
   const [newClassificationDesc, setNewClassificationDesc] = useState('');
+  const [newClassificationKeywords, setNewClassificationKeywords] = useState('');
   const [classificationSubmitting, setClassificationSubmitting] = useState(false);
   const [classificationModalError, setClassificationModalError] = useState('');
   const [selectedRecipientId, setSelectedRecipientId] = useState(letter?.recipient_id || '');
@@ -86,6 +93,7 @@ export default function LetterFormView({
   );
 
   const [isFirstLoadSelected, setIsFirstLoadSelected] = useState(true);
+  const [isFirstClassificationLoad, setIsFirstClassificationLoad] = useState(true);
 
   // For copy recipients additions
   const [newCopyName, setNewCopyName] = useState('');
@@ -195,15 +203,150 @@ export default function LetterFormView({
 
   const [modalError, setModalError] = useState('');
 
+  // Sync currentLetterId if letter prop changes (e.g. switching letters or cloning)
+  useEffect(() => {
+    setCurrentLetterId(letter?.id || null);
+  }, [letter]);
+
+  // Initialize lastSavedJSON with original or loaded letter's values
+  useEffect(() => {
+    setLastSavedJSON(JSON.stringify({
+      letterType: letter?.letter_type || 'standard',
+      selectedFileId: letter?.file_id || '',
+      selectedClassificationId: letter?.subject_classification_id || '',
+      selectedRecipientId: letter?.recipient_id || '',
+      subject: letter?.subject || '',
+      body: letter?.body || '<p>মহোদয়,</p><p>বিনীত নিবেদন এই যে, ...</p>',
+      issueDate: letter?.issue_date || new Date().toISOString().split('T')[0],
+      notes: letter?.notes || '',
+      copyRecipients: letter?.copy_recipients || [],
+      attachments: letter?.attachments || [],
+      showName: letter?.recipient_display_options?.show_name !== false,
+      showDesignation: letter?.recipient_display_options?.show_designation !== false,
+      showOrganization: letter?.recipient_display_options?.show_organization !== false,
+      showAddress: letter?.recipient_display_options?.show_address !== false,
+      selectedSignatoryId: letter?.signatory_officer_id || ''
+    }));
+  }, [letter]);
+
+  // Helper to serialize current form state
+  const getFormStateJSON = () => {
+    return JSON.stringify({
+      letterType,
+      selectedFileId,
+      selectedClassificationId,
+      selectedRecipientId,
+      subject,
+      body,
+      issueDate,
+      notes,
+      copyRecipients,
+      attachments,
+      showName,
+      showDesignation,
+      showOrganization,
+      showAddress,
+      selectedSignatoryId
+    });
+  };
+
+  // Auto-Save background worker
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const currentJSON = getFormStateJSON();
+      // Ensure we have loaded initial state and have changes
+      if (lastSavedJSON && currentJSON !== lastSavedJSON && office?.id && user?.uid) {
+        // We only require a minimal set of fields to auto-save to avoid saving empty drafts
+        if (!selectedFileId && !subject.trim() && (!body || body.trim() === '' || body === '<p>মহোদয়,</p><p>বিনীত নিবেদন এই যে, ...</p>')) {
+          return;
+        }
+
+        const finalMemoNo = memoNo.endsWith('-xx') ? memoNo : (memoNo.includes('-') ? (memoNo.substring(0, memoNo.lastIndexOf('-')) + '-xx') : memoNo);
+
+        setAutoSaveStatus('saving');
+        try {
+          const letterData = {
+            id: currentLetterId || undefined,
+            office_id: office.id,
+            file_id: selectedFileId,
+            subject_classification_id: selectedClassificationId || undefined,
+            recipient_id: selectedRecipientId || undefined,
+            sender_user_id: profile?.id || '',
+            signatory_officer_id: selectedSignatoryId || undefined,
+            subject: subject,
+            body: body,
+            letter_type: letterType,
+            memo_no: finalMemoNo,
+            serial_no: '',
+            issue_date: issueDate,
+            status: 'draft' as const,
+            notes: notes,
+            created_by: user.uid,
+            copy_recipients: copyRecipients,
+            attachments: attachments,
+            recipient_display_options: {
+              show_name: showName,
+              show_designation: showDesignation,
+              show_organization: showOrganization,
+              show_address: showAddress
+            }
+          };
+
+          const documentId = await saveLetter(letterData);
+          setCurrentLetterId(documentId);
+          setLastSavedJSON(currentJSON);
+          
+          const nowStr = new Date().toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setAutoSaveStatus(`saved-at: ${nowStr}`);
+        } catch (err) {
+          console.error("Auto-save failed:", err);
+          setAutoSaveStatus('failed');
+        }
+      }
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [
+    lastSavedJSON,
+    currentLetterId,
+    letterType,
+    selectedFileId,
+    selectedClassificationId,
+    selectedRecipientId,
+    subject,
+    body,
+    issueDate,
+    notes,
+    copyRecipients,
+    attachments,
+    showName,
+    showDesignation,
+    showOrganization,
+    showAddress,
+    selectedSignatoryId,
+    office,
+    profile,
+    user,
+    memoNo
+  ]);
+
   // Auto-sync classification on file change
   useEffect(() => {
     if (selectedFileId) {
+      if (isFirstClassificationLoad) {
+        setIsFirstClassificationLoad(false);
+        if (letter?.subject_classification_id) {
+          return;
+        }
+      }
       const fileObj = files.find(f => f.id === selectedFileId);
       if (fileObj && fileObj.subject_classification_id) {
         setSelectedClassificationId(fileObj.subject_classification_id);
       }
+    } else {
+      setIsFirstClassificationLoad(false);
     }
-  }, [selectedFileId, files]);
+  }, [selectedFileId, files, letter?.subject_classification_id, isFirstClassificationLoad]);
 
   // Auto-generate memo when selectedFileId or selectedClassificationId changes
   useEffect(() => {
@@ -246,6 +389,33 @@ export default function LetterFormView({
 
     triggerMemoGen();
   }, [selectedFileId, selectedClassificationId, letterType, files, classifications, office, letter]);
+
+  // Find recommended classifications based on keywords
+  const recommendedClassifications = React.useMemo(() => {
+    if (!subject.trim() && (!body || body === '<p>মহোদয়,</p><p>বিনীত নিবেদন এই যে, ...</p>')) {
+      return [];
+    }
+
+    const textToMatch = `${subject} ${body.replace(/<[^>]*>/g, '')}`.toLowerCase();
+    
+    const matches = classifications
+      .map(c => {
+        if (!c.keywords || c.keywords.length === 0) return { classification: c, score: 0 };
+        
+        let score = 0;
+        c.keywords.forEach(kw => {
+          if (kw && textToMatch.includes(kw.toLowerCase())) {
+            score += 1;
+          }
+        });
+        
+        return { classification: c, score };
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return matches.map(m => m.classification);
+  }, [subject, body, classifications]);
 
   // Clean form defaults depending on type
   useEffect(() => {
@@ -541,11 +711,17 @@ export default function LetterFormView({
 
     setClassificationSubmitting(true);
     try {
+      const keywordsArray = newClassificationKeywords
+        .split(',')
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+
       const addedId = await saveSubjectClassification({
         office_id: office?.id || '',
         code: newClassificationCode.trim(),
         title: newClassificationTitle.trim(),
         description: newClassificationDesc.trim() || undefined,
+        keywords: keywordsArray,
         active: true
       });
 
@@ -555,6 +731,7 @@ export default function LetterFormView({
       setNewClassificationCode('');
       setNewClassificationTitle('');
       setNewClassificationDesc('');
+      setNewClassificationKeywords('');
       setClassificationModalError('');
 
       // Close modal
@@ -665,7 +842,7 @@ export default function LetterFormView({
 
     try {
       await onSave({
-        id: letter?.id,
+        id: currentLetterId || undefined,
         office_id: office?.id || '',
         file_id: selectedFileId,
         subject_classification_id: selectedClassificationId || undefined,
@@ -727,7 +904,7 @@ export default function LetterFormView({
 
     try {
       await onSave({
-        id: letter?.id,
+        id: currentLetterId || undefined,
         office_id: office?.id || '',
         file_id: selectedFileId,
         subject_classification_id: selectedClassificationId || undefined,
@@ -789,7 +966,28 @@ export default function LetterFormView({
         </div>
         
         {/* Save/Issue Controls */}
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3">
+          {autoSaveStatus !== 'idle' && (
+            <div className="text-xs text-gray-500 flex items-center gap-1.5 animate-pulse bg-gray-50 px-2.5 py-1.5 rounded-md border border-gray-100">
+              {autoSaveStatus === 'saving' ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                  <span>স্বয়ংক্রিয়ভাবে ড্রাফট সংরক্ষণ করা হচ্ছে...</span>
+                </>
+              ) : autoSaveStatus === 'failed' ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                  <span className="text-red-500 font-medium">অটো-সেভ ব্যর্থ হয়েছে</span>
+                </>
+              ) : (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>ড্রাফট স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়েছে ({autoSaveStatus.replace('saved-at: ', '')})</span>
+                </>
+              )}
+            </div>
+          )}
+          <div className="flex gap-2">
           <button
             type="button"
             onClick={() => handleSubmit(false)}
@@ -808,6 +1006,7 @@ export default function LetterFormView({
           </button>
         </div>
       </div>
+    </div>
 
       {errorText && (
         <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-semibold">
@@ -1047,7 +1246,7 @@ export default function LetterFormView({
                 (() => {
                   const c = classifications.find(x => x.id === selectedClassificationId);
                   return c ? (
-                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-lg p-3 relative flex flex-col space-y-1">
+                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-lg p-3 relative flex flex-col space-y-1 animate-in fade-in duration-150">
                       <div className="flex justify-between items-start">
                         <span className="text-xs font-bold text-gray-800 flex items-center gap-1">
                           <Layers size={13} className="text-[#006A4E]" />
@@ -1067,18 +1266,47 @@ export default function LetterFormView({
                   ) : null;
                 })()
               ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setClassificationSearchQuery('');
-                    setActiveClassificationTab('existing');
-                    setClassificationModalOpen(true);
-                  }}
-                  className="w-full py-2.5 border border-dashed border-gray-200 hover:border-[#006A4E] text-xs font-semibold text-[#006A4E] hover:bg-emerald-50/20 rounded-lg text-center transition cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Plus size={14} />
-                  শ্রেণি বিন্যাস নির্বাচন করুন
-                </button>
+                <div className="space-y-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClassificationSearchQuery('');
+                      setActiveClassificationTab('existing');
+                      setClassificationModalOpen(true);
+                    }}
+                    className="w-full py-2.5 border border-dashed border-gray-200 hover:border-[#006A4E] text-xs font-semibold text-[#006A4E] hover:bg-emerald-50/20 rounded-lg text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Plus size={14} />
+                    শ্রেণি বিন্যাস নির্বাচন করুন
+                  </button>
+
+                  {/* RECOMMENDATION BLOCK */}
+                  {recommendedClassifications.length > 0 && (
+                    <div className="bg-amber-50/50 border border-amber-150 rounded-lg p-3 space-y-2 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-1.5 text-amber-850 font-bold text-xs" style={{ fontFamily: '"Noto Sans Bengali", sans-serif' }}>
+                        <Sparkles size={13} className="text-amber-600 animate-pulse" />
+                        <span>চিঠির বিষয়বস্তু অনুযায়ী প্রস্তাবিত শ্রেণি বিন্যাস:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {recommendedClassifications.slice(0, 3).map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setSelectedClassificationId(c.id)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-amber-100 border border-amber-200 hover:border-amber-300 text-gray-800 text-xs font-semibold rounded-md transition cursor-pointer text-left shadow-2xs"
+                            style={{ fontFamily: '"Noto Sans Bengali", sans-serif' }}
+                          >
+                            <Layers size={11} className="text-[#006A4E]" />
+                            <span>{c.title} (কোড: {countToBangla(c.code)})</span>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-gray-400 font-medium leading-relaxed" style={{ fontFamily: '"Noto Sans Bengali", sans-serif' }}>
+                        চিঠির বিষয় ও বডিতে ব্যবহৃত কীওয়ার্ডের মিলের ভিত্তিতে এই সুপারিশগুলো করা হয়েছে।
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
               <p className="text-[10px] text-gray-400 mt-1">চিঠির জন্য বিষয় ভিত্তিক শ্রেণি বিন্যাস নির্ধারণ করুন (মডালে নতুন শ্রেণি তৈরি করতে পারবেন)।</p>
             </div>
@@ -2764,6 +2992,21 @@ export default function LetterFormView({
                     />
                   </div>
 
+                  {/* Keywords */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">কীওয়ার্ডসমূহ (Keywords)</label>
+                      <span className="text-[10px] text-gray-400">কমা দিয়ে লিখুন</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={newClassificationKeywords}
+                      onChange={(e) => setNewClassificationKeywords(e.target.value)}
+                      placeholder="যেমন: বাজেট, অডিট, নিরীক্ষা, সাধারণ"
+                      className="w-full p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+                    />
+                  </div>
+
                   {/* Submit Button */}
                   <div className="pt-3 flex justify-end gap-2 border-t border-gray-100 mt-2">
                     <button
@@ -2772,6 +3015,7 @@ export default function LetterFormView({
                         setNewClassificationCode('');
                         setNewClassificationTitle('');
                         setNewClassificationDesc('');
+                        setNewClassificationKeywords('');
                         setClassificationModalError('');
                         setClassificationModalOpen(false);
                       }}

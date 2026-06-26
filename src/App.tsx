@@ -15,7 +15,8 @@ import {
   Menu, 
   X,
   Sparkles,
-  Award
+  Award,
+  Trash2
 } from 'lucide-react';
 import { useAuth, AuthProvider } from './contexts/AuthContext';
 import { collection, query, where, orderBy, onSnapshot, getDocs } from 'firebase/firestore';
@@ -33,6 +34,8 @@ import {
   saveUserProfile, 
   saveFile, 
   saveSubjectClassification, 
+  deleteSubjectClassification,
+  clearAndReSeedSubjectClassifications,
   saveRecipient, 
   logAuditAction, 
   getAuditLogs,
@@ -73,6 +76,9 @@ function AppContent() {
   
   // Cloned letter template state
   const [clonedLetter, setClonedLetter] = useState<Letter | null>(null);
+  
+  // Letter deletion modal state
+  const [deleteLetterId, setDeleteLetterId] = useState<string | null>(null);
   
   const [dataLoading, setDataLoading] = useState(false);
 
@@ -406,7 +412,7 @@ function AppContent() {
     handleReloadLogs();
   };
 
-  const handleSaveClassification = async (classData: Omit<SubjectClassification, 'id'>) => {
+  const handleSaveClassification = async (classData: Omit<SubjectClassification, 'id'> & { id?: string }) => {
     if (!office || !profile) return;
     await saveSubjectClassification(classData);
     
@@ -414,10 +420,45 @@ function AppContent() {
       office.id,
       profile.id,
       profile.name,
-      'create',
+      classData.id ? 'update' : 'create',
       'classification',
       '-',
-      `বিষয় শ্রেণি বিন্যাস যোগ করা হয়েছে: ${classData.title} (${classData.code})`
+      classData.id
+        ? `বিষয় শ্রেণি বিন্যাস হালনাগাদ করা হয়েছে: ${classData.title} (${classData.code})`
+        : `বিষয় শ্রেণি বিন্যাস যোগ করা হয়েছে: ${classData.title} (${classData.code})`
+    );
+    handleReloadLogs();
+  };
+
+  const handleDeleteClassification = async (id: string) => {
+    if (!office || !profile) return;
+    const target = classifications.find(c => c.id === id);
+    await deleteSubjectClassification(id);
+    if (target) {
+      await logAuditAction(
+        office.id,
+        profile.id,
+        profile.name,
+        'delete',
+        'classification',
+        '-',
+        `বিষয় শ্রেণি বিন্যাস মুছে ফেলা হয়েছে: ${target.title} (${target.code})`
+      );
+    }
+    handleReloadLogs();
+  };
+
+  const handleClearAndReSeedClassifications = async () => {
+    if (!office || !profile) return;
+    await clearAndReSeedSubjectClassifications(office.id);
+    await logAuditAction(
+      office.id,
+      profile.id,
+      profile.name,
+      'update',
+      'classification',
+      '-',
+      `সকল বিষয় শ্রেণি বিন্যাস মুছে ছবি অনুযায়ী নতুন তালিকা এন্ট্রি করা হয়েছে।`
     );
     handleReloadLogs();
   };
@@ -703,6 +744,8 @@ function AppContent() {
             <ClassificationsView 
               classifications={classifications}
               onSaveClassification={handleSaveClassification}
+              onDeleteClassification={handleDeleteClassification}
+              onClearAndReSeedClassifications={handleClearAndReSeedClassifications}
               officeId={office.id}
             />
           )}

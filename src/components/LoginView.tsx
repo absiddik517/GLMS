@@ -101,7 +101,17 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
       }, 500);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg('গুগল সাইন-ইন করতে ব্যর্থ হয়েছে। দয়া করে পুনরায় চেষ্টা করুন।');
+      let detail = 'দয়া করে পুনরায় চেষ্টা করুন।';
+      if (err.code === 'auth/popup-blocked') {
+        detail = 'ব্রাউজারে পপ-আপ উইন্ডোটি ব্লক করা আছে। অনুগ্রহ করে পপ-আপ অনুমোদন দিয়ে পুনরায় চেষ্টা করুন।';
+      } else if (err.code === 'auth/unauthorized-domain') {
+        detail = 'এই ডোমেইনটি আপনার ফায়ারবেস কনসোলের Authorized Domains তালিকায় যুক্ত নেই। অনুগ্রহ করে কনসোলে ডোমেইনটি অনুমোদন করুন।';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        detail = 'গুগল সাইন-ইন প্রোভাইডারটি আপনার ফায়ারবেস কনসোলে সচল করা নেই। অনুগ্রহ করে Firebase Console -> Build -> Authentication -> Sign-in method-এ গিয়ে Google সচল করুন।';
+      } else {
+        detail = 'স্থানীয়ভাবে (Local Setup) চালানোর সময় এটি হলে নিশ্চিত করুন যে আপনার নিজস্ব Firebase Project-এর config সঠিকভাবে যুক্ত করা আছে এবং Google Cloud Console-এ Localhost অথরাইজড রিডাইরেক্ট ইউআরআই হিসেবে নিবন্ধিত রয়েছে। আপনি চাইলে নিচে থাকা "ডেমো হিসেবে প্রবেশ করুন" বোতামটি দিয়েও তাৎক্ষণিক সকল ফিচার পরীক্ষা করতে পারবেন।';
+      }
+      setErrorMsg(`গুগল সাইন-ইন করতে ব্যর্থ হয়েছে। ${detail}`);
     } finally {
       setSubmitting(false);
     }

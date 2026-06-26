@@ -40,6 +40,7 @@ export interface SubjectClassification {
   code: string; // e.g. "15"
   title: string; // e.g. "প্রশাসন", "অর্থ", "প্রশিক্ষণ"
   description?: string;
+  keywords?: string[];
   active: boolean;
 }
 
