@@ -1,10 +1,10 @@
 {
-  "projectId": "online-song-hk8sk",
-  "appId": "1:996793588129:web:5322cc2c2783836af713e0",
-  "apiKey": "AIzaSyBM8xdD_A9PRjL0vYs5QGaM7lJ_Vihrgn4",
-  "authDomain": "online-song-hk8sk.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-3b2fa02b-02fd-4564-9f2c-24d7bba16972",
-  "storageBucket": "online-song-hk8sk.firebasestorage.app",
-  "messagingSenderId": "996793588129",
-  "measurementId": ""
+  "projectId": "omss-17c02",
+  "appId": "1:1007643500541:web:3086a33384ea14d2374394",
+  "apiKey": "AIzaSyBiUdvb0tlT8_OiOwaDUA9dK-hiWgtCt1c",
+  "authDomain": "omss-17c02.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "omss-17c02.firebasestorage.app",
+  "messagingSenderId": "1007643500541",
+  "measurementId": "G-X7WMC4F854"
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, LogIn, UserPlus, HelpCircle, Eye, EyeOff, Stamp, Landmark, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, LogIn, UserPlus, HelpCircle, Eye, EyeOff, Stamp, Landmark, ShieldCheck, Copy, Check } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LoginViewProps {
@@ -24,11 +24,22 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
   // Messages
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  
+  // Custom Firebase Authentication Unauthorized Domain states
+  const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState<string | null>(null);
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedDomain(text);
+    setTimeout(() => setCopiedDomain(null), 2000);
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+    setIsUnauthorizedDomain(false);
 
     if (!email || !password) {
       setErrorMsg('অনুগ্রহ করে ইমেইল এবং পাসওয়ার্ড প্রদান করুন।');
@@ -45,6 +56,9 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
         setErrorMsg('প্রদত্ত ইমেইল অথবা পাসওয়ার্ডটি সঠিক নয়। অনুগ্রহ করে পুনরায় চেষ্টা করুন।');
       } else if (err.code === 'auth/operation-not-allowed') {
         setErrorMsg('ইমেইল/পাসওয়ার্ড সাইন-ইন পদ্ধতিটি আপনার ফায়ারবেস কনসোলে বন্ধ করা রয়েছে। আপনি নিচের "গুগল অ্যাকাউন্ট দিয়ে প্রবেশ করুন" বোতাম ব্যবহার করে অবিলম্বে লগইন করতে পারবেন।');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setIsUnauthorizedDomain(true);
+        setErrorMsg('গুগল সাইন-ইন করতে ব্যর্থ হয়েছে। ডোমেইন অনুমোদন ত্রুটি ঘটেছে। অনুগ্রহ করে নিচে প্রদর্শিত সমাধান নির্দেশিকা অনুসরণ করুন।');
       } else {
         setErrorMsg('লগইন ব্যর্থ হয়েছে। আপনার নেটওয়ার্ক সংযোগ যাচাই করে পুনরায় চেষ্টা করুন।');
       }
@@ -57,6 +71,7 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+    setIsUnauthorizedDomain(false);
 
     if (!email || !password || !name || !officeName) {
       setErrorMsg('অনুগ্রহ করে সকল তারকা চিহ্নিত (*) ঘরগুলো পূরণ করুন।');
@@ -81,6 +96,9 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
         setErrorMsg('এই ইমেইলটি দিয়ে ইতিমধ্যে অ্যাকাউন্ট খোলা হয়েছে। অন্য ইমেইল ব্যবহার করুন।');
       } else if (err.code === 'auth/operation-not-allowed') {
         setErrorMsg('ইমেইল/পাসওয়ার্ড সাইন-ইন পদ্ধতিটি আপনার ফায়ারবেস কনসোলে বন্ধ করা রয়েছে। আপনি নিচের "গুগল অ্যাকাউন্ট দিয়ে প্রবেশ করুন" বোতাম ব্যবহার করে অবিলম্বে লগইন করতে পারবেন।');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setIsUnauthorizedDomain(true);
+        setErrorMsg('ডোমেইন অনুমোদন ত্রুটি ঘটেছে। অনুগ্রহ করে নিচে প্রদর্শিত সমাধান নির্দেশিকা অনুসরণ করুন।');
       } else {
         setErrorMsg('অ্যাকাউন্ট তৈরি করতে ব্যর্থ হয়েছে। অনুগ্রহ করে ডাটা ঠিক করুন।');
       }
@@ -92,6 +110,7 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
   const handleGoogleSignIn = async () => {
     setErrorMsg('');
     setSuccessMsg('');
+    setIsUnauthorizedDomain(false);
     setSubmitting(true);
     try {
       await loginWithGoogle();
@@ -105,7 +124,9 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
       if (err.code === 'auth/popup-blocked') {
         detail = 'ব্রাউজারে পপ-আপ উইন্ডোটি ব্লক করা আছে। অনুগ্রহ করে পপ-আপ অনুমোদন দিয়ে পুনরায় চেষ্টা করুন।';
       } else if (err.code === 'auth/unauthorized-domain') {
-        detail = 'এই ডোমেইনটি আপনার ফায়ারবেস কনসোলের Authorized Domains তালিকায় যুক্ত নেই। অনুগ্রহ করে কনসোলে ডোমেইনটি অনুমোদন করুন।';
+        setIsUnauthorizedDomain(true);
+        const currentDomain = window.location.hostname;
+        detail = `এই ডোমেইনটি (${currentDomain}) আপনার ফায়ারবেস কনসোলের Authorized Domains তালিকায় যুক্ত নেই। অনুগ্রহ করে কনসোলে ডোমেইনটি অনুমোদন করুন।`;
       } else if (err.code === 'auth/operation-not-allowed') {
         detail = 'গুগল সাইন-ইন প্রোভাইডারটি আপনার ফায়ারবেস কনসোলে সচল করা নেই। অনুগ্রহ করে Firebase Console -> Build -> Authentication -> Sign-in method-এ গিয়ে Google সচল করুন।';
       } else {
@@ -121,6 +142,7 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+    setIsUnauthorizedDomain(false);
 
     if (!email) {
       setErrorMsg('পাসওয়ার্ড লিংক পাঠাতে আপনার ইমেইলটি দিন।');
@@ -143,6 +165,7 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
   const handleQuickDemoAccess = async () => {
     setErrorMsg('');
     setSuccessMsg('');
+    setIsUnauthorizedDomain(false);
     setSubmitting(true);
     
     const demoEmail = 'demoofficer@glms.gov.bd';
@@ -201,6 +224,99 @@ export default function LoginView({ onSuccess }: LoginViewProps) {
           {errorMsg && (
             <div className="w-full mt-4 p-3 bg-red-50 text-red-700 border border-red-150 rounded-lg text-xs font-semibold leading-relaxed">
               {errorMsg}
+            </div>
+          )}
+
+          {isUnauthorizedDomain && (
+            <div className="w-full mt-4 p-4 bg-amber-50 text-amber-900 border border-amber-200 rounded-xl text-xs space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 font-bold text-amber-800 text-sm">
+                <ShieldCheck className="text-amber-600 shrink-0" size={18} />
+                <span>ডোমেইন অনুমোদন ত্রুটি (Unauthorized Domain)</span>
+              </div>
+              
+              <p className="leading-relaxed text-gray-700">
+                Firebase Authentication-এ গুগল সাইন-ইন ব্যবহার করতে হলে এই অ্যাপের ডোমেইনটি আপনার Firebase প্রোজেক্টের অনুমোদিত তালিকায় যুক্ত করতে হবে।
+              </p>
+
+              <div className="space-y-2 bg-white p-3 rounded-lg border border-amber-150">
+                <p className="font-bold text-gray-800">সমাধান করার পদক্ষেপসমূহ:</p>
+                <ol className="list-decimal list-inside space-y-1.5 text-gray-600 pl-1">
+                  <li>
+                    <a 
+                      href="https://console.firebase.google.com/" 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="text-[#006A4E] font-bold underline hover:text-opacity-80"
+                    >
+                      Firebase Console
+                    </a>-এ গিয়ে আপনার প্রোজেক্টটি (<code className="bg-gray-100 px-1 py-0.5 rounded text-red-600 font-mono">omss-17c02</code>) সিলেক্ট করুন।
+                  </li>
+                  <li>
+                    বাম পাশের মেনু থেকে <strong className="text-gray-800">Build &gt; Authentication</strong>-এ যান।
+                  </li>
+                  <li>
+                    উপরের ট্যাব থেকে <strong className="text-gray-800">Settings</strong> ট্যাবে ক্লিক করুন।
+                  </li>
+                  <li>
+                    বাম পাশের তালিকা থেকে <strong className="text-gray-800">Authorized domains</strong> অপশনে ক্লিক করুন।
+                  </li>
+                  <li>
+                    <strong className="text-gray-800">Add domain</strong> বাটনে ক্লিক করে নিচের ডোমেইনগুলো যুক্ত করুন:
+                  </li>
+                </ol>
+              </div>
+
+              <div className="space-y-2">
+                <p className="font-bold text-gray-700">অনুমোদন করার জন্য ডোমেইনসমূহ:</p>
+                
+                {/* Current Domain */}
+                <div className="flex items-center justify-between gap-2 bg-gray-100 p-2 rounded-lg border border-gray-200 font-mono text-[11px] text-gray-800">
+                  <span className="truncate select-all">{window.location.hostname}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(window.location.hostname)}
+                    className="p-1 hover:bg-gray-200 rounded text-[#006A4E] transition flex items-center gap-1 shrink-0 font-sans font-semibold text-[10px]"
+                  >
+                    {copiedDomain === window.location.hostname ? (
+                      <>
+                        <Check size={12} className="text-emerald-600" />
+                        <span>কপি হয়েছে</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={12} />
+                        <span>কপি করুন</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Production/Preview Domain */}
+                <div className="flex items-center justify-between gap-2 bg-gray-100 p-2 rounded-lg border border-gray-200 font-mono text-[11px] text-gray-800">
+                  <span className="truncate select-all">ais-pre-zanqmacoeejscigheycxhn-909600848359.asia-east1.run.app</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy('ais-pre-zanqmacoeejscigheycxhn-909600848359.asia-east1.run.app')}
+                    className="p-1 hover:bg-gray-200 rounded text-[#006A4E] transition flex items-center gap-1 shrink-0 font-sans font-semibold text-[10px]"
+                  >
+                    {copiedDomain === 'ais-pre-zanqmacoeejscigheycxhn-909600848359.asia-east1.run.app' ? (
+                      <>
+                        <Check size={12} className="text-emerald-600" />
+                        <span>কপি হয়েছে</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={12} />
+                        <span>কপি করুন</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-1 text-gray-600 leading-relaxed">
+                💡 <strong className="text-gray-800">বিকল্প পথ:</strong> আপনি যদি এখনই কনফিগার করতে না চান, তবে নিচের <strong className="text-[#006A4E]">"ডেমো হিসেবে প্রবেশ করুন"</strong> বাটনটি ক্লিক করে ইমেইল ছাড়াই তাৎক্ষণিক অ্যাপের সব ফিচার ব্যবহার করতে পারবেন!
+              </div>
             </div>
           )}
 
