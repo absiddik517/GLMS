@@ -93,13 +93,18 @@ function AppContent() {
     const lettersRef = collection(db, 'letters');
     const qLetters = query(
       lettersRef, 
-      where('office_id', '==', officeId),
-      orderBy('updated_at', 'desc')
+      where('office_id', '==', officeId)
     );
     const unsLetters = onSnapshot(qLetters, (snapshot) => {
       const list: Letter[] = [];
       snapshot.forEach((doc) => {
         list.push({ id: doc.id, ...doc.data() } as Letter);
+      });
+      // Sort in-memory descending by updated_at
+      list.sort((a, b) => {
+        const dateA = a.updated_at || '';
+        const dateB = b.updated_at || '';
+        return dateB.localeCompare(dateA);
       });
       setLetters(list);
       setDataLoading(false);

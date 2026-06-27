@@ -58,6 +58,7 @@ export default function LetterFormView({
 
   // Form states
   const [letterType, setLetterType] = useState<LetterType>(letter?.letter_type || 'standard');
+  const [letterTypeModalOpen, setLetterTypeModalOpen] = useState(!letter);
   const [selectedFileId, setSelectedFileId] = useState(letter?.file_id || '');
   const [selectedClassificationId, setSelectedClassificationId] = useState(letter?.subject_classification_id || '');
   const [classificationModalOpen, setClassificationModalOpen] = useState(false);
@@ -1021,25 +1022,23 @@ export default function LetterFormView({
         <div className="bg-white p-6 rounded-lg border border-gray-100 shadow-xs lg:col-span-2 space-y-5">
           <h2 className="text-md font-bold text-gray-800 border-b border-gray-100 pb-2">চিঠিপত্রের বিবরণ (Body & Details)</h2>
           
-          {/* Letter Type Selection */}
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">পত্রের বিবরণ / ধরন (Letter Type)</label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {letterTypes.map((t) => (
-                <button
-                  key={t.k}
-                  type="button"
-                  onClick={() => setLetterType(t.k)}
-                  className={`p-2 text-xs font-bold rounded-lg border text-center transition ${
-                    letterType === t.k 
-                      ? 'bg-emerald-50 text-[#006A4E] border-[#006A4E]' 
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  {t.v.split(' ')[0]} {/* display first word like "সাধারণ" */}
-                </button>
-              ))}
+          {/* Letter Type Selection (Taken in Modal as requested) */}
+          <div className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <span className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide">পত্রের বিবরণ / ধরন (Selected Letter Type)</span>
+              <span className="text-sm font-bold text-[#006A4E] mt-0.5 block flex items-center gap-2">
+                <FileCheck size={16} />
+                {letterTypes.find(t => t.k === letterType)?.v || 'সাধারণ পত্র'}
+              </span>
             </div>
+            <button
+              type="button"
+              onClick={() => setLetterTypeModalOpen(true)}
+              className="px-3.5 py-1.5 bg-white hover:bg-gray-50 border border-gray-200 hover:border-[#006A4E] text-[#006A4E] rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+            >
+              <Sparkles size={14} className="animate-pulse" />
+              পত্রের ধরন পরিবর্তন করুন
+            </button>
           </div>
 
           {/* Subject Block (Hidden for office order) */}
@@ -3178,6 +3177,101 @@ export default function LetterFormView({
               >
                 <CheckCircle2 size={14} />
                 নিশ্চিত করুন ও জারি করুন
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* LETTER TYPE SELECTION MODAL */}
+      {letterTypeModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] animate-scaleIn">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-emerald-50/10">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-50 rounded-lg text-[#006A4E]">
+                  <FileCheck size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-800">
+                    সরকারি পত্রের ধরন ও বিবরণ নির্বাচন করুন
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-0.5 font-medium">নিচের তালিকা থেকে আপনার পত্রের নির্দিষ্ট ধরন নির্বাচন করুন</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLetterTypeModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition p-1.5 hover:bg-gray-100 rounded-full cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {letterTypes.map((t) => {
+                  let desc = '';
+                  if (t.k === 'standard') desc = 'দাপ্তরিক চিঠি, স্মারক পত্র, আবেদন বা সাধারণ যোগাযোগের জন্য।';
+                  else if (t.k === 'office_order') desc = 'প্রতিষ্ঠানের অভ্যন্তরে কর্মকর্তা/কর্মচারীদের নির্দেশ বা দায়িত্ব বণ্টনের জন্য।';
+                  else if (t.k === 'notice') desc = 'যেকোনো নোটিশ বা জরুরি বিজ্ঞপ্তি প্রকাশের জন্য।';
+                  else if (t.k === 'circular') desc = 'সার্বিক নিয়ম, নির্দেশনা বা গুরুত্বপূর্ণ পরিপত্র জারির জন্য।';
+                  else if (t.k === 'invitation') desc = 'দাপ্তরিক ও আনুষ্ঠানিক আমন্ত্রণের জন্য আমন্ত্রণপত্র।';
+                  else if (t.k === 'meeting') desc = 'সভার বিজ্ঞপ্তি, এজেন্ডা ও আলোচ্যসূচি প্রেরণের জন্য।';
+                  else if (t.k === 'training') desc = 'কর্মশালা, ট্রেনিং কোর্স বা সেমিনারের আমন্ত্রণ ও নোটিশ।';
+
+                  const isSelected = letterType === t.k;
+
+                  return (
+                    <div
+                      key={t.k}
+                      onClick={() => setLetterType(t.k)}
+                      className={`p-4 rounded-xl border-2 transition cursor-pointer flex gap-3.5 items-start ${
+                        isSelected 
+                          ? 'border-[#006A4E] bg-emerald-50/30 ring-1 ring-[#006A4E]/35 shadow-xs' 
+                          : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/30'
+                      }`}
+                    >
+                      <div className={`p-2 rounded-lg mt-0.5 ${isSelected ? 'bg-[#006A4E]/10 text-[#006A4E]' : 'bg-gray-100 text-gray-500'}`}>
+                        <FileCheck size={16} />
+                      </div>
+                      <div className="flex-1">
+                        <span className={`block text-xs font-bold leading-none ${isSelected ? 'text-[#006A4E]' : 'text-gray-800'}`}>
+                          {t.v.split(' (')[0]}
+                        </span>
+                        <span className="block text-[10px] text-gray-400 font-mono mt-1 leading-none">
+                          {t.v.includes('(') ? t.v.substring(t.v.indexOf('(') + 1, t.v.indexOf(')')) : ''}
+                        </span>
+                        <p className="text-xs text-gray-500 font-medium leading-relaxed mt-2">
+                          {desc}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-2.5 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={() => setLetterTypeModalOpen(false)}
+                className="px-4.5 py-2 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 rounded-lg text-xs font-semibold cursor-pointer transition shadow-2xs"
+              >
+                বাতিল (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={() => setLetterTypeModalOpen(false)}
+                className="px-5.5 py-2 bg-[#006A4E] hover:bg-opacity-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition"
+              >
+                <CheckCircle2 size={14} />
+                নিশ্চিত করুন (Select)
               </button>
             </div>
 
