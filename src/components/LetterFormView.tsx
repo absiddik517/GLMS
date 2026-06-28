@@ -103,7 +103,88 @@ export default function LetterFormView({
 
   // For attachments additions
   const [attachments, setAttachments] = useState<string[]>(letter?.attachments || []);
+  const [tags, setTags] = useState<string[]>(letter?.tags || []);
+  const [newTagInput, setNewTagInput] = useState('');
   const [newAttachment, setNewAttachment] = useState('');
+
+  // Automatic intelligence to fill tags based on subject and body
+  const generateIntelligentTags = () => {
+    const suggestedTags: string[] = [];
+    const textToAnalyze = `${subject} ${body.replace(/<[^>]*>/g, '')}`.toLowerCase();
+
+    // 1. Check if there is a selected subject classification
+    if (selectedClassificationId) {
+      const selectedClass = classifications.find(c => c.id === selectedClassificationId);
+      if (selectedClass) {
+        // Add the classification title itself as a tag
+        const cleanTitle = selectedClass.title.replace(/সংক্রান্ত|সমূহ|সংক্রান্ত নথি/g, '').trim();
+        if (cleanTitle && !suggestedTags.includes(cleanTitle)) {
+          suggestedTags.push(cleanTitle);
+        }
+      }
+    }
+
+    // 2. Scan all subject classifications keywords
+    classifications.forEach(c => {
+      // Check title match
+      const cleanTitle = c.title.replace(/সংক্রান্ত|সমূহ|সংক্রান্ত নথি/g, '').trim();
+      if (textToAnalyze.includes(cleanTitle.toLowerCase()) || textToAnalyze.includes(c.title.toLowerCase())) {
+        if (cleanTitle && !suggestedTags.includes(cleanTitle)) {
+          suggestedTags.push(cleanTitle);
+        }
+      }
+
+      // Check keywords match
+      if (c.keywords && Array.isArray(c.keywords)) {
+        c.keywords.forEach(keyword => {
+          if (keyword && keyword.trim() && textToAnalyze.includes(keyword.trim().toLowerCase())) {
+            if (cleanTitle && !suggestedTags.includes(cleanTitle)) {
+              suggestedTags.push(cleanTitle);
+            }
+          }
+        });
+      }
+    });
+
+    // 3. Scan general intelligence mappings
+    const generalRules = [
+      { keywords: ['ছুটি', 'নৈমিত্তিক', 'অর্জিত', 'leave'], tag: 'ছুটি' },
+      { keywords: ['বাজেট', 'বরাদ্দ', 'অর্থ', 'টাকা', 'বিল', 'ভাতা', 'মঞ্জুরি', 'budget'], tag: 'আর্থিক' },
+      { keywords: ['প্রশিক্ষণ', 'কর্মশালা', 'ট্রেনিং', 'সেমিনার', 'training', 'workshop'], tag: 'প্রশিক্ষণ' },
+      { keywords: ['অডিট', 'নিরীক্ষা', 'আপত্তি', 'audit'], tag: 'অডিট' },
+      { keywords: ['তদন্ত', 'অভিযোগ', 'শাস্তি', 'মামলা'], tag: 'তদন্ত ও অভিযোগ' },
+      { keywords: ['কমিটি', 'সভা', 'কার্যবিবরণী', 'রেজুলেশন', 'মিটিং', 'meeting'], tag: 'কমিটি ও সভা' },
+      { keywords: ['জরুরি', 'তাৎক্ষণিক', 'অবিলম্বে', 'জরুরী', 'urgent'], tag: 'জরুরি' },
+      { keywords: ['ক্রয়', 'দরপত্র', 'টেন্ডার', 'procurement', 'tender'], tag: 'ক্রয়' },
+      { keywords: ['নিয়োগ', 'পদোন্নতি', 'বদলি', 'যোগদান', 'নিয়োগ বিধি'], tag: 'প্রশাসন' },
+      { keywords: ['প্রতিবেদন', 'রিপোর্ট', 'বিবরণী', 'report'], tag: 'প্রতিবেদন' },
+      { keywords: ['অনুমোদন', 'অনুমতি', 'মঞ্জুর'], tag: 'অনুমোদন' },
+      { keywords: ['পরিপত্র', 'circular'], tag: 'পরিপত্র' },
+      { keywords: ['নোটিশ', 'notice'], tag: 'নোটিশ' }
+    ];
+
+    generalRules.forEach(rule => {
+      const match = rule.keywords.some(kw => textToAnalyze.includes(kw));
+      if (match && !suggestedTags.includes(rule.tag)) {
+        suggestedTags.push(rule.tag);
+      }
+    });
+
+    // 4. Add letter type specific tag
+    const typeTags: Record<string, string> = {
+      office_order: 'অফিস আদেশ',
+      notice: 'বিজ্ঞপ্তি',
+      circular: 'পরিপত্র',
+      invitation: 'আমন্ত্রণপত্র',
+      meeting: 'সভার নোটিশ',
+      training: 'প্রশিক্ষণ নোটিশ'
+    };
+    if (typeTags[letterType] && !suggestedTags.includes(typeTags[letterType])) {
+      suggestedTags.push(typeTags[letterType]);
+    }
+
+    return suggestedTags.slice(0, 5); // Limit to top 5 most relevant tags
+  };
   const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const [historyPresets, setHistoryPresets] = useState<string[]>([]);
 
@@ -243,6 +324,7 @@ export default function LetterFormView({
       notes,
       copyRecipients,
       attachments,
+      tags,
       showName,
       showDesignation,
       showOrganization,
@@ -285,6 +367,7 @@ export default function LetterFormView({
             created_by: user.uid,
             copy_recipients: copyRecipients,
             attachments: attachments,
+            tags: tags,
             recipient_display_options: {
               show_name: showName,
               show_designation: showDesignation,
@@ -320,6 +403,7 @@ export default function LetterFormView({
     notes,
     copyRecipients,
     attachments,
+    tags,
     showName,
     showDesignation,
     showOrganization,
@@ -861,6 +945,7 @@ export default function LetterFormView({
         created_by: user?.uid || '',
         copy_recipients: copyRecipients,
         attachments: attachments,
+        tags: tags,
         recipient_display_options: {
           show_name: showName,
           show_designation: showDesignation,
@@ -923,6 +1008,7 @@ export default function LetterFormView({
         created_by: user?.uid || '',
         copy_recipients: copyRecipients,
         attachments: attachments,
+        tags: tags,
         recipient_display_options: {
           show_name: showName,
           show_designation: showDesignation,
@@ -1054,6 +1140,7 @@ export default function LetterFormView({
               />
             </div>
           )}
+
 
           {/* Core TipTap Editor Connect */}
           <div>
@@ -1491,6 +1578,110 @@ export default function LetterFormView({
                 স্মারক নম্বর দেখতে অনুগ্রহ করে ফাইল (Nothi) নির্বাচন করুন।
               </div>
             )}
+          </div>
+
+          {/* Letters Taggable UI with Intelligence suggestions */}
+          <div className="bg-white p-6 rounded-lg border border-gray-100 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-gray-100 pb-2">
+              <label className="block text-md font-bold text-gray-800 flex items-center gap-1.5">
+                <Sparkles size={16} className="text-[#006A4E]" />
+                পত্রের ট্যাগসমূহ (Letter Tags)
+              </label>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  const suggested = generateIntelligentTags();
+                  const merged = Array.from(new Set([...tags, ...suggested]));
+                  setTags(merged);
+                }}
+                className="text-xs font-bold text-[#006A4E] hover:bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-100 flex items-center gap-1.5 transition cursor-pointer self-start"
+                title="পত্রের বিষয় ও বিবরণের ভিত্তিতে ট্যাগ স্বয়ংক্রিয়ভাবে জেনারেট করুন"
+              >
+                <Sparkles size={13} className="animate-pulse" />
+                স্বয়ংক্রিয় ট্যাগ (AI Suggest)
+              </button>
+            </div>
+
+            {/* Tags Badges list */}
+            <div className="flex flex-wrap gap-1.5">
+              {tags.length === 0 ? (
+                <span className="text-[11px] text-gray-400 italic">কোনো ট্যাগ যোগ করা হয়নি। নিচের বক্সে লিখে এন্টার দিন অথবা সাজেশন থেকে ট্যাগ নির্বাচন করুন।</span>
+              ) : (
+                tags.map((tag, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-50 text-[#006A4E] px-2.5 py-0.5 rounded-full border border-emerald-100 shadow-3xs">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => setTags(tags.filter(t => t !== tag))}
+                      className="text-[#006A4E] hover:text-red-500 rounded-full hover:bg-emerald-100 p-0.5 transition cursor-pointer"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+
+            {/* Input field to add manual tags */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newTagInput}
+                onChange={(e) => setNewTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const val = newTagInput.trim();
+                    if (val && !tags.includes(val)) {
+                      setTags([...tags, val]);
+                    }
+                    setNewTagInput('');
+                  }
+                }}
+                placeholder="নতুন ট্যাগ টাইপ করুন..."
+                className="flex-1 p-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#006A4E]"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const val = newTagInput.trim();
+                  if (val && !tags.includes(val)) {
+                    setTags([...tags, val]);
+                  }
+                  setNewTagInput('');
+                }}
+                className="bg-[#006A4E] hover:bg-opacity-90 text-white px-3.5 rounded-lg text-xs font-bold transition flex items-center justify-center cursor-pointer shadow-xs"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+
+            {/* Live suggestions */}
+            {(() => {
+              const suggested = generateIntelligentTags().filter(t => !tags.includes(t));
+              if (suggested.length === 0) return null;
+              return (
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
+                    প্রস্তাবিত ট্যাগ (Suggested Tags):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {suggested.map((tag, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setTags([...tags, tag])}
+                        className="text-[10px] font-semibold bg-gray-50 hover:bg-[#006A4E]/10 hover:text-[#006A4E] text-gray-600 hover:border-[#006A4E]/30 px-2.5 py-0.5 rounded-full border border-gray-200 cursor-pointer transition flex items-center gap-0.5"
+                      >
+                        <Plus size={9} />
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* SIGNATORY SELECTION PREVIEW */}

@@ -125,6 +125,7 @@ export interface Letter {
   copy_recipients?: CopyRecipient[];
   recipient_display_options?: RecipientDisplayOptions;
   attachments?: string[];
+  tags?: string[];
 }
 
 export interface CopyRecipient {

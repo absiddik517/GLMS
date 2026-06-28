@@ -89,9 +89,23 @@ export default function LetterListView({
   const [selectedType, setSelectedType] = useState('all');
   const [selectedFile, setSelectedFile] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState(initialShowArchived ? 'archived' : 'all_active');
+  const [selectedTag, setSelectedTag] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  // Extract all unique tags across letters
+  const allTags = useMemo(() => {
+    const tagsSet = new Set<string>();
+    letters.forEach(l => {
+      if (l.tags && Array.isArray(l.tags)) {
+        l.tags.forEach(t => {
+          if (t && t.trim()) tagsSet.add(t.trim());
+        });
+      }
+    });
+    return Array.from(tagsSet);
+  }, [letters]);
 
   // Clear filters
   const resetFilters = () => {
@@ -99,6 +113,7 @@ export default function LetterListView({
     setSelectedType('all');
     setSelectedFile('all');
     setSelectedStatus(initialShowArchived ? 'archived' : 'all_active');
+    setSelectedTag('all');
     setStartDate('');
     setEndDate('');
   };
@@ -131,6 +146,11 @@ export default function LetterListView({
       // File filtration
       if (selectedFile !== 'all' && l.file_id !== selectedFile) return false;
 
+      // Tag filtration
+      if (selectedTag !== 'all') {
+        if (!l.tags || !l.tags.includes(selectedTag)) return false;
+      }
+
       // Date range filter
       if (startDate && l.issue_date < startDate) return false;
       if (endDate && l.issue_date > endDate) return false;
@@ -158,7 +178,7 @@ export default function LetterListView({
 
       return true;
     });
-  }, [letters, searchTerm, selectedType, selectedFile, selectedStatus, startDate, endDate, recipients]);
+  }, [letters, searchTerm, selectedType, selectedFile, selectedStatus, startDate, endDate, recipients, selectedTag]);
 
   const letterTypesMap: { [key: string]: string } = {
     standard: 'সাধারণ পত্র',
@@ -231,7 +251,7 @@ export default function LetterListView({
 
         {/* Advanced Filters Drawer */}
         {showAdvancedFilters && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-gray-55/60 bg-gray-50 rounded-xl border border-gray-200 transition-all text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 p-4 bg-gray-55/60 bg-gray-50 rounded-xl border border-gray-200 transition-all text-xs">
             {/* Letter Type */}
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-1">পত্র ধরণ</label>
@@ -262,6 +282,21 @@ export default function LetterListView({
               </select>
             </div>
 
+            {/* Tag Selection */}
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">ট্যাগসমূহ (Tags)</label>
+              <select
+                value={selectedTag}
+                onChange={(e) => setSelectedTag(e.target.value)}
+                className="p-1.5 border border-gray-300 rounded-lg w-full bg-white text-xs focus:outline-none text-gray-700"
+              >
+                <option value="all">সকল ট্যাগ ({allTags.length}টি)</option>
+                {allTags.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Date Start */}
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-1">শুরু তারিখ</label>
@@ -288,7 +323,7 @@ export default function LetterListView({
               </div>
             </div>
 
-            <div className="md:col-span-4 flex justify-end gap-2 pt-2 border-t border-gray-200">
+            <div className="md:col-span-5 flex justify-end gap-2 pt-2 border-t border-gray-200">
               <button 
                 onClick={resetFilters}
                 className="text-gray-500 hover:text-gray-700 font-bold text-xs"
@@ -333,9 +368,26 @@ export default function LetterListView({
                       <p className="text-gray-900 font-bold truncate" title={l.subject}>
                         {l.subject ? highlightText(l.subject, searchTerm) : <span className="text-gray-400 italic text-[10px]">শিরোনামহীন পত্র</span>}
                       </p>
-                      <span className="inline-block text-[9px] text-[#006A4E] font-bold px-1.5 py-0.2 bg-emerald-50 rounded border border-emerald-100/60 mt-1 h-auto">
-                        {letterTypesMap[l.letter_type]}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="inline-block text-[9px] text-[#006A4E] font-bold px-1.5 py-0.2 bg-emerald-50 rounded border border-emerald-100/60 h-auto">
+                          {letterTypesMap[l.letter_type]}
+                        </span>
+                        {l.tags && l.tags.length > 0 && l.tags.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTag(tag);
+                              setShowAdvancedFilters(true);
+                            }}
+                            className="text-[9px] font-bold bg-gray-100 hover:bg-[#006A4E]/10 text-gray-600 hover:text-[#006A4E] px-1.5 py-0.2 rounded border border-gray-200 hover:border-[#006A4E]/30 transition cursor-pointer flex items-center gap-0.5"
+                            title={`ক্লিক করে "${tag}" ট্যাগ অনুযায়ী ফিল্টার করুন`}
+                          >
+                            #{tag}
+                          </button>
+                        ))}
+                      </div>
                     </td>
 
                     {/* RECIPIENT */}

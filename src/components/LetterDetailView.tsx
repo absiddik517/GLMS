@@ -138,9 +138,9 @@ export default function LetterDetailView({
             // Set background to pure white and default base styles
             element.style.backgroundColor = '#ffffff';
             element.style.color = '#000000';
-            element.style.setProperty('font-size', '8pt', 'important');
+            element.style.setProperty('font-size', '13pt', 'important');
 
-            // Force all child text elements to black and set font-size to 8pt to comply with office styles
+            // Force all child text elements to black and set font-size to 13pt to comply with office styles
             const clonedChildren = element.querySelectorAll('*');
             clonedChildren.forEach((childEl: any) => {
               // Strip and replace any inline style colors carrying oklch
@@ -157,7 +157,7 @@ export default function LetterDetailView({
 
               const tagName = childEl.tagName.toLowerCase();
               if (['p', 'span', 'li', 'td', 'th', 'a', 'h1', 'h2', 'h3', 'h4', 'div', 'ol', 'ul'].includes(tagName)) {
-                childEl.style.setProperty('font-size', '8pt', 'important');
+                childEl.style.setProperty('font-size', '13pt', 'important');
               }
 
               // Apply clean high contrast borders for tables or list structures
